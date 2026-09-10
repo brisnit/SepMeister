@@ -15,22 +15,15 @@ const GARMENT_PRESETS = [
 ];
 
 /**
- * Screen-count presets.
+ * Every screen count from one to eighteen, plus no limit.
  *
- * Runs past the six-to-eight range a design tool usually assumes, because
- * production shops run 12-, 16- and 18-station automatics and a job on one of
- * those is not an edge case.
+ * Deliberately a full range rather than a curated set of "sensible" values.
+ * A one-colour print is an ordinary job, and so is a fourteen-colour one on an
+ * automatic; picking which counts deserve a button would just put a shop's
+ * real job one click further away.
  */
 const SCREEN_OPTIONS: { value: number; label: string }[] = [
-  { value: 4, label: "4" },
-  { value: 5, label: "5" },
-  { value: 6, label: "6" },
-  { value: 8, label: "8" },
-  { value: 10, label: "10" },
-  { value: 12, label: "12" },
-  { value: 14, label: "14" },
-  { value: 16, label: "16" },
-  { value: 18, label: "18" },
+  ...Array.from({ length: 18 }, (_, i) => ({ value: i + 1, label: String(i + 1) })),
   { value: 0, label: "No Limit" },
 ];
 

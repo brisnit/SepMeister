@@ -182,10 +182,14 @@ Print at 100%. Never "fit to page".
 
 ## Screen counts
 
-Up to 24 screens, with presets at 4/5/6/8/10/12/14/16/18 and no-limit.
-Production shops run 12-, 16- and 18-station automatics, and a job on one of
-those is not an edge case — the previous 12-screen ceiling silently truncated
-them.
+Every count from **1 to 18**, plus no-limit (which resolves to 24). Deliberately
+a full range rather than a curated set: a one-colour print is an ordinary job,
+and so is a fourteen-colour one on an automatic. Production shops run 12-, 16-
+and 18-station presses, and a job on one of those is not an edge case.
+
+A one-screen job on a dark garment prints the ink and lets the garment show
+through everywhere else — the underbase is dropped rather than returning two
+screens against a one-screen limit.
 
 Two consequences worth knowing:
 

@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { placeTooltip, type TooltipPlacement } from "@/lib/ui/tooltip";
 
 export function Label({ children, hint }: { children: ReactNode; hint?: string }) {
   return (
@@ -114,10 +115,6 @@ export function Slider({
   );
 }
 
-/** Distance from the viewport edge the tooltip will not cross, in px. */
-const TIP_MARGIN = 8;
-const TIP_WIDTH = 256;
-
 /**
  * Hover/focus tooltip. Used to explain every Sep Score heuristic.
  *
@@ -125,38 +122,38 @@ const TIP_WIDTH = 256;
  * panels these live in scroll, and a scrolling ancestor clips on *both* axes --
  * `overflow-y: auto` implies horizontal clipping too, so an absolutely
  * positioned tooltip gets its left edge sliced off against the panel wall.
- * A portal plus fixed coordinates escapes the clip entirely, and the position
- * is then clamped to the viewport so it stays readable near any edge.
+ * A portal escapes the clip entirely; `placeTooltip` then keeps it on screen.
  */
 export function InfoTip({ text, children }: { text: string; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ left: number; top: number; below: boolean } | null>(null);
+  const [placement, setPlacement] = useState<TooltipPlacement | null>(null);
   const anchorRef = useRef<HTMLButtonElement>(null);
+  const tipRef = useRef<HTMLSpanElement>(null);
 
   const place = useCallback(() => {
     const el = anchorRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-
-    // Prefer right-aligned to the trigger, then clamp into the viewport.
-    let left = r.right - TIP_WIDTH;
-    const maxLeft = window.innerWidth - TIP_WIDTH - TIP_MARGIN;
-    if (left > maxLeft) left = maxLeft;
-    if (left < TIP_MARGIN) left = TIP_MARGIN;
-
-    // Flip below the trigger when there is not room above it.
-    const below = r.top < 140;
-    const top = below ? r.bottom + 6 : r.top - 6;
-
-    setPos({ left, top, below });
+    // Measure the rendered tooltip when it exists, so the above/below decision
+    // uses its real height rather than an assumed one.
+    const height = tipRef.current?.getBoundingClientRect().height ?? 0;
+    setPlacement(
+      placeTooltip(
+        { left: r.left, right: r.right, top: r.top, bottom: r.bottom },
+        { width: window.innerWidth, height: window.innerHeight },
+        height,
+      ),
+    );
   }, []);
 
   const show = useCallback(() => { place(); setOpen(true); }, [place]);
   const hide = useCallback(() => setOpen(false), []);
 
-  // A tooltip anchored to a moving element must follow it or disappear.
+  // Re-measure once the tooltip has rendered, and keep it with its trigger
+  // while the panel behind it scrolls.
   useEffect(() => {
     if (!open) return;
+    place();
     const onChange = () => place();
     window.addEventListener("scroll", onChange, true);
     window.addEventListener("resize", onChange);
@@ -181,15 +178,16 @@ export function InfoTip({ text, children }: { text: string; children?: ReactNode
       >
         {children ?? "?"}
       </button>
-      {open && pos && typeof document !== "undefined"
+      {open && placement && typeof document !== "undefined"
         ? createPortal(
             <span
+              ref={tipRef}
               role="tooltip"
               style={{
-                left: pos.left,
-                top: pos.top,
-                width: TIP_WIDTH,
-                transform: pos.below ? undefined : "translateY(-100%)",
+                left: placement.left,
+                top: placement.top,
+                width: placement.width,
+                transform: placement.below ? undefined : "translateY(-100%)",
               }}
               className="pointer-events-none fixed z-[100] rounded border border-ink-700 bg-ink-900 px-2.5 py-2 text-[11px] font-normal leading-relaxed text-white shadow-xl"
             >

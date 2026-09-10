@@ -123,6 +123,62 @@ describe("high screen counts", () => {
   });
 });
 
+describe("low screen counts", () => {
+  it("honours every count from one to eighteen", () => {
+    for (let max = 1; max <= 18; max++) {
+      const out = separate(max).out;
+      expect(out.plan.inks.length, `max ${max} produced ${out.plan.inks.length}`).toBeLessThanOrEqual(max);
+      expect(out.plan.inks.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("gives exactly one screen when one is asked for", () => {
+    const out = separate(1).out;
+    expect(out.plan.inks).toHaveLength(1);
+  });
+
+  it("drops the underbase rather than exceeding a one-screen limit", () => {
+    // A base plus an ink is two screens. On a one-colour job the ink prints
+    // and the garment shows through everywhere else.
+    const out = separate(1).out;
+    expect(out.plan.garmentIsDark).toBe(true);
+    expect(out.plan.inks.find((i) => i.type === "underbase")).toBeUndefined();
+    expect(out.plan.explanation).not.toMatch(/underbase was added/i);
+  });
+
+  it("keeps the underbase as soon as there is room for it", () => {
+    const out = separate(2).out;
+    expect(out.plan.inks).toHaveLength(2);
+    expect(out.plan.inks.find((i) => i.type === "underbase")).toBeDefined();
+  });
+
+  it("still reports what the artwork actually wanted", () => {
+    const out = separate(1).out;
+    // The recommendation is independent of the limit, so a one-screen job
+    // still tells the artist the design has far more colour in it.
+    expect(out.plan.recommendedScreens).toBeGreaterThan(1);
+    expect(out.plan.explanation).toMatch(/color families/);
+  });
+
+  it("produces a usable single screen on a light garment too", () => {
+    const art = manyColorArtwork();
+    const out = runSeparation({
+      pixels: art.pixels, width: art.width, height: art.height, dpi: 300,
+      settings: settings({ maxScreens: 1, garmentColor: "#f5f5f5" }),
+      halftoneDefaults: { enabled: false, lpi: 45, shape: "round" },
+    });
+    expect(out.plan.inks).toHaveLength(1);
+    expect(out.plan.inks[0].coverage).toBeGreaterThan(0);
+  });
+
+  it("stays deterministic at one screen", () => {
+    const a = separate(1).out;
+    const b = separate(1).out;
+    expect(a.plan.inks[0].name).toBe(b.plan.inks[0].name);
+    expect(Buffer.from(a.plan.inks[0].mask)).toEqual(Buffer.from(b.plan.inks[0].mask));
+  });
+});
+
 describe("angle assignment past the preset size", () => {
   it("reuses angles rather than inventing unusable ones", () => {
     // Only about six angles fit in 90 degrees at a usable spacing.

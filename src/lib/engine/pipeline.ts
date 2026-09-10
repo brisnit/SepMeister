@@ -159,7 +159,14 @@ export function runSeparation(input: SeparationInput): SeparationOutput {
   // "No limit" still needs a ceiling so clustering cannot run away, but it has
   // to sit above what a large automatic press can actually run.
   const hardMax = settings.maxScreens ?? MAX_SCREENS;
-  const reserveForBase = isDark ? 1 : 0;
+
+  // A one-screen job cannot also carry a base. Asking for one screen and
+  // getting two back would break the limit the artist set, so on a
+  // single-screen job the ink itself is what prints and the garment shows
+  // through everywhere else -- which is what a one-colour print on a dark
+  // shirt actually is.
+  const canAffordBase = isDark && hardMax > 1;
+  const reserveForBase = canAffordBase ? 1 : 0;
   const colorBudget = Math.max(1, hardMax - reserveForBase);
 
   // What the artwork itself contains, measured without reference to the
@@ -427,7 +434,7 @@ export function runSeparation(input: SeparationInput): SeparationOutput {
   const scaledChoke = resolveChokePixels(ubOpts.chokePx, dpi);
 
   let underbaseMask: Mask | null = null;
-  if (isDark) {
+  if (canAffordBase) {
     underbaseMask = buildUnderbase({
       width,
       height,
