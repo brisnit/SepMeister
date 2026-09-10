@@ -18,7 +18,8 @@ import { renderFilmPng } from "./render";
 import { resampleMask, planFilmRaster } from "./resample";
 import { buildLayout, describeSize, type FilmLayout } from "./layout";
 import { slugify } from "@/lib/engine/naming";
-import { checkMeshSafety, findAngleConflicts, type HalftoneParams } from "@/lib/engine/halftone";
+import { checkMeshSafety, type HalftoneParams } from "@/lib/engine/halftone";
+import { findMoireRisks } from "@/lib/engine/overlap";
 import { effectiveDpi, filmSize, smallestSheetFor } from "@/lib/production/size";
 import { runFilmQa, type FilmQaInput } from "./filmQa";
 import { createLabelMeasurer } from "./pdf";
@@ -64,6 +65,14 @@ export interface BundleResult {
   films: { name: string; pdfBytes: number; pngBytes: number; rasterWidth: number; rasterHeight: number }[];
 }
 
+/** "Cream", "Cream and Navy", "Cream, Navy and 12 others". */
+function listNames(names: string[]): string {
+  if (names.length === 1) return names[0];
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  if (names.length === 3) return `${names[0]}, ${names[1]} and ${names[2]}`;
+  return `${names[0]}, ${names[1]} and ${names.length - 2} others`;
+}
+
 /** One-line description of how the job's screens are screened. */
 export function describeHalftones(inks: InkSeparation[]): string {
   const screened = inks.filter((i) => i.halftone.enabled);
@@ -85,25 +94,55 @@ export function halftoneParamsFor(ink: InkSeparation, rasterDpi: number): Halfto
   return { lpi: ink.halftone.lpi, angle: ink.halftone.angle, shape: ink.halftone.shape, dpi: rasterDpi };
 }
 
-/** Production warnings derived purely from the settings, without rendering. */
-export function collectProductionWarnings(plan: SeparationPlan, qa: QAResult): string[] {
+/**
+ * Production warnings derived from the plan, without rendering film.
+ *
+ * `pixelCount` enables overlap-aware moire detection. Without it the check
+ * falls back to raw angle proximity, which on a large job flags every reused
+ * angle whether or not those screens ever touch.
+ */
+export function collectProductionWarnings(
+  plan: SeparationPlan,
+  qa: QAResult,
+  pixelCount?: number,
+): string[] {
   const warnings: string[] = [...qa.warnings];
 
+  // Grouped by the mesh/LPI combination that caused them.
+  //
+  // A 16-station job running one line count across the rack would otherwise
+  // produce fourteen near-identical warnings, which reads as noise and buries
+  // anything specific. One line per distinct combination stays scannable.
+  const meshIssues = new Map<string, { names: string[]; message: string; recommendation: string | null }>();
   for (const ink of plan.inks) {
     if (!ink.halftone.enabled) continue;
     const safety = checkMeshSafety(ink.halftone.lpi, ink.mesh);
-    if (!safety.safe && safety.message) {
-      warnings.push(`${ink.name}: ${safety.message}${safety.recommendation ? ` Consider: ${safety.recommendation}.` : ""}`);
-    }
+    if (safety.safe || !safety.message) continue;
+    const key = `${ink.halftone.lpi}/${ink.mesh}`;
+    const entry = meshIssues.get(key);
+    if (entry) entry.names.push(ink.name);
+    else meshIssues.set(key, { names: [ink.name], message: safety.message, recommendation: safety.recommendation });
   }
 
-  const conflicts = findAngleConflicts(
-    plan.inks.map((i) => ({ id: i.id, label: i.name, angle: i.halftone.angle, enabled: i.halftone.enabled })),
-  );
-  for (const c of conflicts) {
+  for (const { names, message, recommendation } of meshIssues.values()) {
     warnings.push(
-      `${c.a} and ${c.b} are only ${c.separation.toFixed(1)}° apart — if these screens overlap, expect moire.`,
+      `${listNames(names)}: ${message}${recommendation ? ` Consider: ${recommendation}.` : ""}`,
     );
+  }
+
+  if (pixelCount && pixelCount > 0) {
+    const risks = findMoireRisks(
+      plan.inks.map((i) => ({
+        label: i.name, angle: i.halftone.angle, screened: i.halftone.enabled, mask: i.mask,
+      })),
+      pixelCount,
+    );
+    for (const r of risks) {
+      warnings.push(
+        `${r.a} and ${r.b} are ${r.separation.toFixed(1)}° apart and overlap over ` +
+        `${(r.overlap * 100).toFixed(0)}% of the smaller screen — expect moire.`,
+      );
+    }
   }
 
   return warnings;
@@ -235,7 +274,7 @@ export async function buildExportBundle(input: BundleInput): Promise<BundleResul
     note: ink.note,
   }));
 
-  const warnings = collectProductionWarnings(plan, input.qa);
+  const warnings = collectProductionWarnings(plan, input.qa, input.width * input.height);
   const base = plan.inks.find((i) => i.type === "underbase");
   const sheet = filmSize(productionSize, exportSettings.marginIn);
   const createdAt = new Date().toISOString().replace("T", " ").slice(0, 19) + " UTC";

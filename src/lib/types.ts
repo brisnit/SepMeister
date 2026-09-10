@@ -1,5 +1,16 @@
 /** Core data model for Sep AI. Shaped so accounts/jobs can be layered on later. */
 
+/**
+ * Upper bound on screens in one job.
+ *
+ * Sized for real automatic presses rather than for what a design tool assumes:
+ * 16- and 18-station carousels are ordinary in production shops, and a job that
+ * genuinely needs every station should not be silently truncated. This is a
+ * guard against runaway clustering, not an opinion about how many screens a
+ * shop ought to use.
+ */
+export const MAX_SCREENS = 24;
+
 export type SeparationMethod = "ai" | "spot" | "simulated" | "index";
 export type InkType = "underbase" | "spot" | "black" | "highlight";
 export type InkChemistry = "plastisol" | "waterbased" | "unknown";

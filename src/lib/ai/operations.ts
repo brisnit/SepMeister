@@ -10,6 +10,8 @@
  * change it suggests is inspectable, reversible, and reproducible.
  */
 
+import { MAX_SCREENS } from "@/lib/types";
+
 export type SeparationOperation =
   | { action: "reduce_screen_count"; target: number }
   | { action: "increase_screen_count"; target: number }
@@ -100,6 +102,8 @@ function findInk(context: CommandContext, phrase: string): { id: string; name: s
 const NUMBER_WORDS: Record<string, number> = {
   one: 1, two: 2, three: 3, four: 4, five: 5, six: 6,
   seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12,
+  thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+  eighteen: 18, nineteen: 19, twenty: 20,
 };
 
 function parseNumber(text: string): number | null {
@@ -147,7 +151,7 @@ export function parseCommand(input: string, context: CommandContext): OperationR
   if (/\b(reduce|cut|drop|lower|limit|bring)\b/.test(text) && /\bscreens?\b/.test(text)) {
     const n = parseNumber(text);
     if (n === null) return no("How many screens should this reduce to? Try “reduce this to 5 screens”.");
-    if (n < 1 || n > 12) return no("Screen counts between 1 and 12 are supported.");
+    if (n < 1 || n > MAX_SCREENS) return no(`Screen counts between 1 and ${MAX_SCREENS} are supported.`);
     return yes([{ action: "reduce_screen_count", target: Math.round(n) }],
       `Re-separate with a maximum of ${Math.round(n)} screens, merging the least significant inks.`);
   }

@@ -11,7 +11,7 @@
 
 import { rgbToLab, labToRgb, rgbToHex, hexToLab, deltaE2000, relativeLuminance, hexToRgb, type Lab } from "@/lib/color/space";
 import { analyzeArtwork, garmentIsDark, type AnalyzeResult } from "./analyze";
-import { kmeansLab, estimateNaturalClusters, mergeCloseClusters } from "./cluster";
+import { kmeansLab, estimateNaturalClusters, mergeCloseClusters, countNaturalFamilies } from "./cluster";
 import { buildMembershipMasks, despeckle, unionCoverage } from "./masks";
 import { buildUnderbase, resolveChokePixels, DEFAULT_UNDERBASE, type UnderbaseOptions } from "./underbase";
 import { assessGarmentAsBlack, solidifyBlack } from "./black";
@@ -19,12 +19,14 @@ import { applyLevels, erode, dilate, maskStats, type Mask } from "./morphology";
 import { nameForColor, disambiguateNames } from "./naming";
 import { DEFAULT_ANGLE_PRESET, angleFromPreset } from "./halftone";
 import { suggestPrintOrder, applyPrintOrder } from "./printOrder";
+import { assignAnglesByOverlap } from "./overlap";
 import { compositeLayers, flattenOnGarment } from "./composite";
 import { meanDeltaE, ssim, similarityPercent } from "./metrics";
 import { scoreSeparation } from "./qa";
-import type {
-  HalftoneSettings, InkHalftone, InkSeparation, MergeRecord, ProductionSettings,
-  ProgressEvent, SeparationPlan, QAResult,
+import {
+  MAX_SCREENS,
+  type HalftoneSettings, type InkHalftone, type InkSeparation, type MergeRecord,
+  type ProductionSettings, type ProgressEvent, type SeparationPlan, type QAResult,
 } from "@/lib/types";
 
 /** Fixed seed. Changing this changes every output; treat it as a format version. */
@@ -154,12 +156,26 @@ export function runSeparation(input: SeparationInput): SeparationOutput {
 
   // How many screens may we spend? The underbase is reserved out of the
   // budget up front, because it is not optional on a dark garment.
-  const hardMax = settings.maxScreens ?? 12;
+  // "No limit" still needs a ceiling so clustering cannot run away, but it has
+  // to sit above what a large automatic press can actually run.
+  const hardMax = settings.maxScreens ?? MAX_SCREENS;
   const reserveForBase = isDark ? 1 : 0;
   const colorBudget = Math.max(1, hardMax - reserveForBase);
 
-  // Estimate what the artwork naturally wants, independent of the budget.
-  const natural = estimateNaturalClusters(analysis.bins, 2, Math.min(12, Math.max(3, colorBudget + 3)), ENGINE_SEED);
+  // What the artwork itself contains, measured without reference to the
+  // artist's screen budget so the two numbers can be compared meaningfully.
+  const naturalFamilies = countNaturalFamilies(analysis.bins, {
+    maxK: MAX_SCREENS + 4,
+    mergeDeltaE: AUTO_MERGE_DE,
+    minSignificance: MIN_SIGNIFICANCE,
+    seed: ENGINE_SEED,
+  });
+
+  // Separately, the point of diminishing returns within the budget, which is
+  // what governs how generously to over-cluster before merging.
+  const natural = estimateNaturalClusters(
+    analysis.bins, 2, Math.min(MAX_SCREENS, Math.max(3, colorBudget + 3)), ENGINE_SEED,
+  );
 
   // Cluster generously, then reduce perceptually. Over-clustering first and
   // merging afterwards produces better ink choices than clustering directly
@@ -209,8 +225,6 @@ export function runSeparation(input: SeparationInput): SeparationOutput {
       weights = keepIdx.map((i) => weights[i]);
     }
   }
-
-  const naturalFamilies = centers.length;
 
   // Identify garment knockouts: clusters the garment itself can supply.
   const knockoutIdx = new Set<number>();
@@ -483,6 +497,21 @@ export function runSeparation(input: SeparationInput): SeparationOutput {
   // order", so the initial sequence and the suggestion can never disagree.
   const ordered = applyPrintOrder(inks, suggestPrintOrder(inks).order);
 
+  // Past about six screens the angle set has to be reused. Choosing which
+  // screens share an angle from measured overlap keeps the reuse on pairs that
+  // never touch, which is what makes a 12- or 16-colour job workable at all.
+  if (halftoneDefaults.enabled) {
+    const screened = ordered.filter((ink) => ink.halftone.enabled);
+    if (screened.length > DEFAULT_ANGLE_PRESET.angles.length) {
+      const angles = assignAnglesByOverlap(
+        screened.map((ink) => ink.mask),
+        n,
+        DEFAULT_ANGLE_PRESET.angles,
+      );
+      screened.forEach((ink, i) => { ink.halftone = { ...ink.halftone, angle: angles[i] }; });
+    }
+  }
+
   report({ stage: "preview", message: "Preparing preview" });
 
   const composite = compositeLayers(
@@ -524,7 +553,9 @@ export function runSeparation(input: SeparationInput): SeparationOutput {
     garmentIsDark: isDark,
     maxScreens: settings.maxScreens,
     method: settings.method,
-    recommendedScreens: Math.min(natural.recommended + reserveForBase, hardMax),
+    // Deliberately NOT capped at the limit: showing "recommended 17, limit 6"
+    // is the whole reason both numbers exist.
+    recommendedScreens: naturalFamilies + reserveForBase,
     naturalColorFamilies: naturalFamilies,
     inks: ordered,
     printOrder: ordered.map((i) => i.id),

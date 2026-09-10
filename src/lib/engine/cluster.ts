@@ -243,6 +243,30 @@ export function estimateNaturalClusters(
 }
 
 /**
+ * Counts the ink families the artwork actually contains, independent of any
+ * screen budget.
+ *
+ * This has to be budget-independent to be worth showing. "Recommended 16,
+ * limit 6" tells an artist something real; a recommendation derived from their
+ * own limit would only ever tell them what they already set. So it clusters
+ * generously and folds together whatever is perceptually the same ink,
+ * regardless of how many stations the press has.
+ */
+export function countNaturalFamilies(
+  bins: ColorBin[],
+  opts: { maxK: number; mergeDeltaE: number; minSignificance: number; seed?: number },
+): number {
+  if (bins.length === 0) return 0;
+  const k = Math.min(bins.length, opts.maxK);
+  const initial = kmeansLab(bins, k, { seed: opts.seed ?? 0x5eed });
+  const merged = mergeCloseClusters(initial.centers, initial.weights, opts.mergeDeltaE);
+
+  const total = merged.weights.reduce((s, w) => s + w, 0) || 1;
+  const significant = merged.weights.filter((w) => w / total >= opts.minSignificance).length;
+  return Math.max(1, significant);
+}
+
+/**
  * Merges clusters that are perceptually indistinguishable, so a "6 screen"
  * request does not spend two screens on the same navy.
  */

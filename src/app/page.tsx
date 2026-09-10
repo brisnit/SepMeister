@@ -841,10 +841,13 @@ export default function Page() {
   );
 
   // ---- Output ----------------------------------------------------------
-  const productionWarnings = useMemo(
-    () => (plan && qa ? collectProductionWarnings(plan, qa) : []),
-    [plan, qa],
-  );
+  const productionWarnings = useMemo(() => {
+    if (!plan || !qa) return [];
+    const source = sourceRef.current;
+    // Passing the pixel count enables overlap-aware moire detection, so a
+    // large job flags only the screens that genuinely beat against each other.
+    return collectProductionWarnings(plan, qa, source ? source.width * source.height : undefined);
+  }, [plan, qa]);
 
   const openOutputCheck = useCallback(async () => {
     if (!plan) return;

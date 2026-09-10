@@ -14,12 +14,23 @@ const GARMENT_PRESETS = [
   { name: "Gray", hex: "#8a8f96" },
 ];
 
+/**
+ * Screen-count presets.
+ *
+ * Runs past the six-to-eight range a design tool usually assumes, because
+ * production shops run 12-, 16- and 18-station automatics and a job on one of
+ * those is not an edge case.
+ */
 const SCREEN_OPTIONS: { value: number; label: string }[] = [
   { value: 4, label: "4" },
   { value: 5, label: "5" },
   { value: 6, label: "6" },
   { value: 8, label: "8" },
   { value: 10, label: "10" },
+  { value: 12, label: "12" },
+  { value: 14, label: "14" },
+  { value: 16, label: "16" },
+  { value: 18, label: "18" },
   { value: 0, label: "No Limit" },
 ];
 

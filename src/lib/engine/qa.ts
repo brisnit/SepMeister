@@ -83,11 +83,17 @@ export function scoreSeparation(input: ScoreInput): QAResult {
   }
 
   const knockoutShare = plan.knockouts.reduce((s, k) => s + k.coverage, 0);
-  // Rewards using the garment instead of ink; penalises redundant screens
-  // and screens that carry almost nothing.
   const trivialInks = plan.inks.filter((i) => i.coverage < 0.005).length;
+
+  // Measures waste, not screen count.
+  //
+  // A 16-screen job on a 16-station automatic is what the press is for, and
+  // scoring it as inefficient purely for being large would be wrong. What
+  // actually wastes a station is a screen that duplicates another, a screen
+  // carrying almost nothing, or printing a colour the garment could have
+  // supplied for free.
   const efficiency =
-    100 - nearDupes * 14 - trivialInks * 10 + Math.min(15, knockoutShare * 40) - Math.max(0, printed - 8) * 5;
+    100 - nearDupes * 14 - trivialInks * 10 + Math.min(15, knockoutShare * 40);
 
   subscores.push({
     key: "efficiency",
@@ -96,9 +102,10 @@ export function scoreSeparation(input: ScoreInput): QAResult {
     detail:
       `${printed} screen${printed === 1 ? "" : "s"}` +
       (nearDupes > 0 ? `, ${nearDupes} near-duplicate pair${nearDupes === 1 ? "" : "s"}` : "") +
+      (trivialInks > 0 ? `, ${trivialInks} barely used` : "") +
       (knockoutShare > 0.01 ? `, ${(knockoutShare * 100).toFixed(0)}% garment knockout` : ""),
     tooltip:
-      "Counts screens against the work they do: inks that are perceptually near-duplicates, inks covering almost nothing, and credit for letting the garment supply a color instead of printing it.",
+      "Whether each screen earns its station: inks that are perceptually near-duplicates of another, inks covering almost nothing, and credit for letting the garment supply a color instead of printing it. A large job is not penalised for being large.",
   });
   if (nearDupes > 0) warnings.push(`${nearDupes} ink pair${nearDupes === 1 ? "" : "s"} within ΔE 10 — they may be combinable.`);
   if (trivialInks > 0) warnings.push(`${trivialInks} separation${trivialInks === 1 ? "" : "s"} cover under 0.5% of the artwork.`);
@@ -115,15 +122,24 @@ export function scoreSeparation(input: ScoreInput): QAResult {
   }
   const fragmentRatio = totalComponents > 0 ? totalSmall / totalComponents : 0;
   const trapDependence = plan.knockouts.length > 0 && analysis.edgeComplexity > 0.2 ? 12 : 0;
-  const regScore = 100 - fragmentRatio * 55 - analysis.edgeComplexity * 60 - trapDependence - Math.max(0, printed - 6) * 3;
+
+  // Every extra screen is one more alignment that has to hold, so this
+  // genuinely rises with count -- but it saturates. Past a dozen screens the
+  // marginal risk of one more is small compared to the artwork's own detail,
+  // and an unbounded penalty would zero the score on any large job regardless
+  // of how clean the separation actually is.
+  const countRisk = Math.min(24, Math.max(0, printed - 6) * 2.5);
+  const regScore = 100 - fragmentRatio * 55 - analysis.edgeComplexity * 60 - trapDependence - countRisk;
 
   subscores.push({
     key: "registration",
     label: "Registration Risk",
     score: clampScore(regScore),
-    detail: `${totalComponents.toLocaleString()} shapes, ${(fragmentRatio * 100).toFixed(0)}% very small`,
+    detail:
+      `${printed} screens to align, ${totalComponents.toLocaleString()} shapes, ` +
+      `${(fragmentRatio * 100).toFixed(0)}% very small`,
     tooltip:
-      "Higher is safer. Considers the proportion of tiny isolated shapes across all screens, overall edge complexity, how much the design depends on knockouts trapping cleanly, and the number of screens that must align.",
+      "Higher is safer. Considers the proportion of tiny isolated shapes across all screens, overall edge complexity, how much the design depends on knockouts trapping cleanly, and how many screens must align. Screen count raises the risk but its contribution levels off, so a large job is not scored as unprintable for its size alone.",
   });
   if (fragmentRatio > 0.4) warnings.push("Many tiny isolated shapes — registration drift will be visible.");
 

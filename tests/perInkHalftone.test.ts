@@ -224,13 +224,30 @@ describe("production warnings", () => {
     expect(warnings.some((w) => w.includes("110 mesh"))).toBe(true);
   });
 
-  it("flags screens whose angles are too close", () => {
-    const { out } = separate({ enabled: true, lpi: 45, shape: "round" });
+  it("flags overlapping screens whose angles are too close", () => {
+    const { art, out } = separate({ enabled: true, lpi: 45, shape: "round" });
+    const spots = out.plan.inks.filter((i) => i.type !== "underbase");
+    // Spot separations are largely disjoint by construction, so overlap has to
+    // be introduced deliberately: two screens covering the same area at the
+    // same angle is exactly the case that beats.
+    spots[0].halftone = { ...spots[0].halftone, enabled: true, angle: 22.5 };
+    spots[1].halftone = { ...spots[1].halftone, enabled: true, angle: 22.5 };
+    spots[1].mask = new Uint8ClampedArray(spots[0].mask);
+
+    const warnings = collectProductionWarnings(out.plan, out.qa, art.width * art.height);
+    expect(warnings.some((w) => w.includes("moire"))).toBe(true);
+    expect(warnings.some((w) => /overlap over \d+%/.test(w))).toBe(true);
+  });
+
+  it("does not flag ordinary spot separations sharing an angle", () => {
+    // Soft-membership spot screens barely overlap, so reusing an angle across
+    // them is safe — and reporting otherwise would be noise on every job.
+    const { art, out } = separate({ enabled: true, lpi: 45, shape: "round" });
     for (const ink of out.plan.inks) {
       if (ink.type !== "underbase") ink.halftone = { ...ink.halftone, enabled: true, angle: 22.5 };
     }
-    const warnings = collectProductionWarnings(out.plan, out.qa);
-    expect(warnings.some((w) => w.includes("moire"))).toBe(true);
+    const warnings = collectProductionWarnings(out.plan, out.qa, art.width * art.height);
+    expect(warnings.filter((w) => w.includes("moire"))).toHaveLength(0);
   });
 
   it("stays quiet on a sane configuration", () => {

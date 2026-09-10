@@ -180,6 +180,32 @@ Print at 100%. Never "fit to page".
 
 ---
 
+## Screen counts
+
+Up to 24 screens, with presets at 4/5/6/8/10/12/14/16/18 and no-limit.
+Production shops run 12-, 16- and 18-station automatics, and a job on one of
+those is not an edge case — the previous 12-screen ceiling silently truncated
+them.
+
+Two consequences worth knowing:
+
+**Angle reuse is unavoidable past about six screens.** Only about six angles fit
+inside 90 degrees at a usable spacing. Which screens share an angle is decided
+from *measured overlap*, so reuse lands on pairs that never touch.
+
+**Moire warnings are overlap-aware.** Raw angle proximity on a 16-colour job
+flags roughly eighteen pairs, nearly all of which never meet on the shirt —
+which trains an operator to ignore the one that mattered. Sep AI measures the
+shared area and only warns when two screened inks genuinely overlap. In
+practice spot separations are largely disjoint by construction, so a correct
+16-screen job usually reports none.
+
+Screen Efficiency scores *waste*, not count: near-duplicate inks, inks covering
+almost nothing, and credit for garment knockout. A 16-screen job on a
+16-station press is what the press is for. Registration Risk does still rise
+with screen count — every extra screen is one more alignment that has to hold —
+but it saturates rather than zeroing the score on any large job.
+
 ## Halftones
 
 Screening is per-screen, because that is how it actually works: an underbase is
@@ -286,7 +312,11 @@ RIP and press.
 - **Angle recommendations are conventions, not standards.** Different shops,
   presses and RIPs settle on different sets.
 - **Mesh/LPI guardrails are heuristics** from the mesh:LPI ratio rule of thumb.
-  Your press may handle combinations they flag.
+  Your press may handle combinations they flag. Identical combinations are
+  grouped into one warning so a large job stays scannable.
+- **Overlap-aware moire detection is measured, not simulated.** It reports
+  where two screened inks share area at similar angles; whether that actually
+  beats depends on ink opacity, mesh and dot shape.
 - **Artwork above ~4 megapixels is downscaled** for interactive work. The UI
   shows the working size.
 - **CMYK TIFFs are not colour-managed** — they are read through utif's RGBA
