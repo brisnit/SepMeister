@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
-  ExportSettings, FeedbackOutcome, FeedbackRecord, FilmQAReport, HalftoneSettings,
+  ExportSettings, FeedbackRecord, FilmQAReport, HalftoneSettings,
   ImageAnalysis, InkSeparation, JobMetadata, PressPreset, ProductionSettings,
   ProductionSize, QAResult, SeparationPlan,
 } from "@/lib/types";
@@ -13,21 +13,23 @@ import { encodePng } from "@/lib/film/png";
 import { collectProductionWarnings } from "@/lib/film/bundle";
 import { applyPrintOrder } from "@/lib/engine/printOrder";
 import { defaultProductionSize, effectiveDpi } from "@/lib/production/size";
+import { TARGET_WORKING_DPI } from "@/lib/engine/upscale";
 import {
   BUILT_IN_PRESETS, applyPresetToSettings, duplicatePreset, halftoneFromPreset,
   loadPresets, meshForRole, presetFromCurrent, savePresets,
 } from "@/lib/store/presets";
 import { clearSession, loadSession, persistInk, reapplyInkState, saveSession, type PersistedSession } from "@/lib/store/session";
 import { loadAccount, recordSeparation, saveAccount, defaultAccount } from "@/lib/store/account";
-import { addFeedback, feedbackExportJson, feedbackForJob, loadFeedback, saveFeedback } from "@/lib/store/feedback";
+import { addFeedback, feedbackExportCsv, feedbackExportJson, feedbackForJob, loadFeedback, saveFeedback } from "@/lib/store/feedback";
 import { isStorageAvailable, makeId } from "@/lib/store/storage";
 import { UploadScreen, type UploadedInfo } from "@/components/UploadScreen";
 import { SetupScreen } from "@/components/SetupScreen";
 import { Workspace, type ViewMode } from "@/components/Workspace";
 import { OutputCheck } from "@/components/OutputCheck";
 import { ReviewMode } from "@/components/ReviewMode";
-import { FeedbackPanel } from "@/components/FeedbackPanel";
+import { ShopTestPanel, answersFromRecord, emptyAnswers, hasAnswers, type ShopTestAnswers } from "@/components/ShopTestPanel";
 import type { UnderbaseView } from "@/components/UnderbasePanel";
+import type { DemoStep } from "@/components/DemoRail";
 
 type Stage = "upload" | "setup" | "workspace";
 
@@ -56,6 +58,11 @@ interface Source {
   pixels: Uint8ClampedArray;
   width: number;
   height: number;
+}
+
+/** The artwork as decoded, kept so an upscale can be undone without re-uploading. */
+interface OriginalSource extends Source {
+  fileName: string;
 }
 
 export default function Page() {
@@ -90,6 +97,8 @@ export default function Page() {
   const [removeUnderBlack, setRemoveUnderBlack] = useState(true);
   const [highlightWhite, setHighlightWhite] = useState(false);
   const [removeBackground, setRemoveBackground] = useState(true);
+  const [upscaleApplied, setUpscaleApplied] = useState(false);
+  const [upscaledFrom, setUpscaledFrom] = useState<number | null>(null);
 
   const [presets, setPresets] = useState<PressPreset[]>(BUILT_IN_PRESETS);
   const [activePresetId, setActivePresetId] = useState<string | null>(null);
@@ -97,14 +106,20 @@ export default function Page() {
   const [account, setAccount] = useState(defaultAccount);
   const [feedback, setFeedback] = useState<FeedbackRecord[]>([]);
 
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoStep, setDemoStep] = useState<DemoStep>("screens");
   const [showOutputCheck, setShowOutputCheck] = useState(false);
   const [showReview, setShowReview] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [answers, setAnswers] = useState<ShopTestAnswers>(emptyAnswers);
+  const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [qaReport, setQaReport] = useState<FilmQAReport | null>(null);
   const [rasterDpi, setRasterDpi] = useState<number | null>(null);
 
   const clientRef = useRef<EngineClient | null>(null);
   const sourceRef = useRef<Source | null>(null);
+  /** Pre-upscale artwork, so "use original" needs no re-upload. */
+  const originalSourceRef = useRef<OriginalSource | null>(null);
   /** Untouched masks from the last separation, for re-applying ink edits. */
   const baseMasksRef = useRef<Map<string, Uint8ClampedArray>>(new Map());
   /** Ink state restored from a previous session, applied after the next separation. */
@@ -241,6 +256,9 @@ export default function Page() {
       dpi: number; dpiAssumed: boolean; downscaled: boolean;
     }) => {
       sourceRef.current = { pixels, width, height };
+      originalSourceRef.current = { pixels, width, height, fileName: meta.fileName };
+      setUpscaleApplied(false);
+      setUpscaledFrom(null);
       setOriginalRgba(pixels);
 
       const { analyzeArtwork } = await import("@/lib/engine/analyze");
@@ -894,6 +912,15 @@ export default function Page() {
           thumbnail: makeRgbThumb(compositeRgba, source.width, source.height),
           originalThumbnail: testPackage ? makeRgbThumb(source.pixels, source.width, source.height, 900) : null,
           testPackage,
+          sourceUpscale: upscaleApplied && upscaledFrom
+            ? { from: upscaledFrom, to: source.width, resultingDpi: effectiveDpi(source.width, productionSize) }
+            : null,
+          underbaseSettings: {
+            choke: underbaseChoke,
+            strength: underbaseStrength,
+            removeUnderBlack,
+            highlightWhite,
+          },
         },
         (message) => setExportLabel(message),
       );
@@ -913,15 +940,14 @@ export default function Page() {
     } catch (err) {
       fail(err);
     }
-  }, [plan, qa, compositeRgba, metadata, settings, productionSize, halftone, exportSettings, similarity, makeRgbThumb, fail]);
+  }, [
+    plan, qa, compositeRgba, metadata, settings, productionSize, halftone, exportSettings,
+    similarity, makeRgbThumb, fail, upscaleApplied, upscaledFrom,
+    underbaseChoke, underbaseStrength, removeUnderBlack, highlightWhite,
+  ]);
 
-  // ---- Feedback --------------------------------------------------------
-  const onSubmitFeedback = useCallback((data: {
-    outcome: FeedbackOutcome;
-    answers: Record<string, boolean | null>;
-    whatChanged: string;
-    notes: string;
-  }) => {
+  // ---- Shop test feedback ---------------------------------------------
+  const onSaveFeedback = useCallback(() => {
     const source = sourceRef.current;
     if (!plan || !qa || !source) return;
     const inks = [...plan.inks].sort((a, b) => a.order - b.order);
@@ -930,14 +956,32 @@ export default function Page() {
       jobId: metadata.id,
       jobName: metadata.jobName || "Untitled job",
       recordedAt: new Date().toISOString(),
-      outcome: data.outcome,
-      filmsRegistered: data.answers.filmsRegistered ?? null,
-      underbasePrinted: data.answers.underbasePrinted ?? null,
-      detailHeld: data.answers.detailHeld ?? null,
-      colorsClose: data.answers.colorsClose ?? null,
-      changedAnything: data.answers.changedAnything ?? null,
-      whatChanged: data.whatChanged,
-      notes: data.notes,
+      // Derived from the headline question so the older outcome field stays
+      // meaningful for records written before the shop-test questions existed.
+      outcome:
+        answers.wouldBurn === "yes" ? "excellent"
+        : answers.wouldBurn === "with-changes" ? "needs-adjustment"
+        : answers.wouldBurn === "no" ? "failed"
+        : "good",
+      filmsRegistered: answers.registration === null ? null : answers.registration === "good",
+      underbasePrinted: answers.underbase === null ? null : answers.underbase === "good",
+      detailHeld: answers.halftones === null ? null : answers.halftones === "good",
+      colorsClose: answers.separations === null ? null : answers.separations === "good",
+      changedAnything: answers.modifiedBeforePrinting,
+      whatChanged: answers.whatChanged,
+      notes: answers.notes,
+      shopTest: {
+        wouldBurn: answers.wouldBurn,
+        registration: answers.registration,
+        underbase: answers.underbase,
+        separations: answers.separations,
+        halftones: answers.halftones,
+        printOrder: answers.printOrder,
+        timeSaved: answers.timeSaved,
+        normalTimeMinutes: answers.normalTimeMinutes,
+        normalTimeNote: answers.normalTimeNote,
+        wouldPay: answers.wouldPay,
+      },
       snapshot: {
         screens: inks.length,
         garmentColor: plan.garmentColor,
@@ -958,22 +1002,89 @@ export default function Page() {
     const next = addFeedback(feedback, record);
     setFeedback(next);
     saveFeedback(next);
-  }, [plan, qa, metadata, productionSize, similarity, feedback]);
+    setFeedbackSaved(true);
+  }, [plan, qa, metadata, productionSize, similarity, feedback, answers]);
 
-  const onExportFeedback = useCallback(() => {
-    const json = feedbackExportJson(feedback);
-    const blob = new Blob([json], { type: "application/json" });
+  const onExportFeedback = useCallback((format: "json" | "csv") => {
+    const body = format === "csv" ? feedbackExportCsv(feedback) : feedbackExportJson(feedback);
+    const blob = new Blob([body], { type: format === "csv" ? "text/csv" : "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `sep-ai-feedback-${new Date().toISOString().slice(0, 10)}.json`;
+    a.download = `sepwiz-shop-test-${new Date().toISOString().slice(0, 10)}.${format}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   }, [feedback]);
 
+  /**
+   * Resamples the working artwork up to 300 DPI at the chosen print size.
+   *
+   * Replaces the working source so every downstream step -- separation,
+   * preview, export -- operates at the higher resolution consistently. The
+   * decoded original is retained so this is reversible.
+   */
+  const runUpscale = useCallback(async () => {
+    const source = sourceRef.current;
+    if (!source) return;
+    setBusy(true);
+    setBusyLabel("Resampling artwork");
+    try {
+      const res = await client().upscale({
+        pixels: source.pixels.slice().buffer as ArrayBuffer,
+        width: source.width,
+        height: source.height,
+        widthIn: productionSize.widthIn,
+        targetDpi: TARGET_WORKING_DPI,
+      });
+      if (!res.applied) {
+        setBusy(false);
+        setNotice("Artwork already resolves at 300 DPI or higher at this size — nothing to do.");
+        return;
+      }
+      const pixels = new Uint8ClampedArray(res.pixels);
+      setUpscaledFrom(source.width);
+      sourceRef.current = { pixels, width: res.width, height: res.height };
+      setOriginalRgba(pixels);
+      setUpscaleApplied(true);
+      setInfo((i) => (i ? { ...i, width: res.width, height: res.height } : i));
+      setBusy(false);
+      setNotice(
+        `Resampled to ${res.width}px (${Math.round(res.resultingDpi)} DPI at ${productionSize.widthIn.toFixed(2)}in)` +
+        (res.capped ? " — capped to keep memory workable." : "."),
+      );
+    } catch (err) {
+      fail(err);
+    }
+  }, [productionSize, fail]);
+
+  /** Restores the artwork exactly as decoded. */
+  const revertUpscale = useCallback(() => {
+    const original = originalSourceRef.current;
+    if (!original) return;
+    sourceRef.current = { pixels: original.pixels, width: original.width, height: original.height };
+    setOriginalRgba(original.pixels);
+    setUpscaleApplied(false);
+    setUpscaledFrom(null);
+    setInfo((i) => (i ? { ...i, width: original.width, height: original.height } : i));
+    setNotice("Using the original artwork resolution.");
+  }, []);
+
   const reset = useCallback(() => {
+    // Several jobs get tested back to back, so this runs often. Losing an
+    // operator's unsaved notes to a stray click would lose the most valuable
+    // thing collected all day.
+    if (hasAnswers(answers) && !feedbackSaved) {
+      const discard = window.confirm(
+        "You have unsaved test-print feedback for this job.\n\nStart a new separation and discard it?",
+      );
+      if (!discard) return;
+    }
+    setAnswers(emptyAnswers());
+    setFeedbackSaved(false);
+    setDemoMode(false);
+    setDemoStep("screens");
     setStage("upload");
     setPlan(null);
     setInfo(null);
@@ -984,9 +1095,36 @@ export default function Page() {
     setQaReport(null);
     setMetadata(newMetadata());
     sourceRef.current = null;
+    originalSourceRef.current = null;
+    setUpscaleApplied(false);
+    setUpscaledFrom(null);
     baseMasksRef.current.clear();
     pendingInkStateRef.current = null;
     clearSession();
+  }, [answers, feedbackSaved]);
+
+  /**
+   * Demo steps drive the workspace view, so walking the rail actually shows
+   * the thing being described rather than just labelling it.
+   */
+  const onDemoStep = useCallback((s: DemoStep) => {
+    setDemoStep(s);
+    switch (s) {
+      case "screens":
+        setUnderbaseView("off"); setView("composite"); setSelectedInk(null);
+        break;
+      case "underbase":
+        setUnderbaseView("overlay");
+        break;
+      case "halftones":
+        setUnderbaseView("off"); setView("films"); setSelectedInk(null);
+        break;
+      case "order":
+        setUnderbaseView("off"); setView("garment"); setSelectedInk(null);
+        break;
+      default:
+        break;
+    }
   }, []);
 
   const onUnderbase = useCallback((patch: {
@@ -1056,6 +1194,10 @@ export default function Page() {
           onBack={reset}
           removeBackground={removeBackground}
           onRemoveBackground={setRemoveBackground}
+          upscaleApplied={upscaleApplied}
+          upscaledFrom={upscaledFrom}
+          onUpscale={() => void runUpscale()}
+          onRevertUpscale={revertUpscale}
         />
       </>
     );
@@ -1077,6 +1219,9 @@ export default function Page() {
         activePresetId={activePresetId}
         storageAvailable={storageAvailable}
         separationsCompleted={account.separationsCompleted}
+        demoMode={demoMode}
+        demoStep={demoStep}
+        sepScore={qa.score}
         view={view}
         underbaseView={underbaseView}
         selectedInk={selectedInk}
@@ -1095,6 +1240,8 @@ export default function Page() {
         highlightWhite={highlightWhite}
         productionWarnings={productionWarnings}
         onMetadata={setMetadata}
+        onDemoMode={(on) => { setDemoMode(on); if (on) onDemoStep("screens"); }}
+        onDemoStep={onDemoStep}
         onView={setView}
         onUnderbaseView={setUnderbaseView}
         onSelectInk={setSelectedInk}
@@ -1109,7 +1256,11 @@ export default function Page() {
         onProductionSize={(s) => { setProductionSize(s); setQaReport(null); }}
         onOpenOutputCheck={() => void openOutputCheck()}
         onOpenReview={() => setShowReview(true)}
-        onOpenFeedback={() => setShowFeedback(true)}
+        onOpenFeedback={() => {
+          setAnswers(answersFromRecord(feedbackForJob(feedback, metadata.id)));
+          setFeedbackSaved(false);
+          setShowFeedback(true);
+        }}
         onCommand={onCommand}
         onBack={reset}
         onUnderbase={onUnderbase}
@@ -1146,20 +1297,29 @@ export default function Page() {
           width={source.width}
           height={source.height}
           similarity={similarity}
-          screenCount={plan.inks.length}
+          plan={plan}
           garmentColor={plan.garmentColor}
           size={productionSize}
           jobName={metadata.jobName}
           customer={metadata.customer}
+          sepScore={qa.score}
+          verdict={qa.verdict}
+          warnings={productionWarnings}
           onClose={() => setShowReview(false)}
         />
       ) : null}
 
       {showFeedback ? (
-        <FeedbackPanel
-          existing={feedbackForJob(feedback, metadata.id)}
+        <ShopTestPanel
+          answers={answers}
+          jobName={metadata.jobName}
+          screens={plan.inks.length}
+          sepScore={qa.score}
+          similarity={similarity}
+          saved={feedbackSaved}
           recordCount={feedback.length}
-          onSubmit={onSubmitFeedback}
+          onChange={(a) => { setAnswers(a); setFeedbackSaved(false); }}
+          onSave={onSaveFeedback}
           onExport={onExportFeedback}
           onClose={() => setShowFeedback(false)}
         />

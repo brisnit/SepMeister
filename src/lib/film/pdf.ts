@@ -286,8 +286,8 @@ export interface FilmPdfInput {
 export async function buildFilmPdf(input: FilmPdfInput): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(`${input.label.jobName} — ${formatFilmTitle(input.label)}`);
-  doc.setProducer("Sep AI");
-  doc.setCreator("Sep AI");
+  doc.setProducer("SepWiz");
+  doc.setCreator("SepWiz");
   stampDates(doc);
 
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -335,7 +335,7 @@ export interface ProofInput {
 export async function buildProofPdf(input: ProofInput): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(`${input.jobName} — Composite Proof`);
-  doc.setProducer("Sep AI");
+  doc.setProducer("SepWiz");
   stampDates(doc);
 
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -422,7 +422,7 @@ export interface ProductionSheetInput {
 export async function buildProductionSheetPdf(input: ProductionSheetInput): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.setTitle(`${input.jobName} — Production Sheet`);
-  doc.setProducer("Sep AI");
+  doc.setProducer("SepWiz");
   stampDates(doc);
 
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -439,7 +439,7 @@ export async function buildProductionSheetPdf(input: ProductionSheetInput): Prom
   let y = H - M;
 
   page.drawText(pdfSafe("PRODUCTION SHEET"), { x: M, y: y - 16, size: 16, font: bold, color: BLACK });
-  page.drawText(pdfSafe("Sep AI"), { x: W - M - 34, y: y - 16, size: 9, font, color: rgb(0.45, 0.45, 0.5) });
+  page.drawText(pdfSafe("SepWiz"), { x: W - M - 34, y: y - 16, size: 9, font, color: rgb(0.45, 0.45, 0.5) });
   y -= 22;
 
   page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 1, color: BLACK });
@@ -504,11 +504,16 @@ export async function buildProductionSheetPdf(input: ProductionSheetInput): Prom
 
   for (const ink of input.inks) {
     page.drawText(pdfSafe(String(ink.index).padStart(2, "0")), { x: cols[0], y, size: 9, font: bold, color: BLACK });
-    page.drawText(pdfSafe(ink.name), { x: cols[1], y, size: 9, font, color: BLACK });
+    // Fitted to its own column so it cannot run into MESH or COVER.
+    page.drawText(fitToColumn(ink.name, font, 9, cols[2] - cols[1] - 6), {
+      x: cols[1], y, size: 9, font, color: BLACK,
+    });
     page.drawText(pdfSafe(humanizeInkRole(ink.type)), { x: cols[2], y, size: 8, font, color: rgb(0.35, 0.35, 0.42) });
     page.drawText(pdfSafe(String(ink.mesh)), { x: cols[3], y, size: 9, font, color: BLACK });
     page.drawText(pdfSafe(`${ink.coveragePercent.toFixed(1)}%`), { x: cols[4], y, size: 9, font, color: BLACK });
-    page.drawText(pdfSafe(ink.halftone), { x: cols[5], y, size: 8, font, color: rgb(0.2, 0.2, 0.28) });
+    page.drawText(fitToColumn(ink.halftone, font, 8, cols[6] - cols[5] - 6), {
+      x: cols[5], y, size: 8, font, color: rgb(0.2, 0.2, 0.28),
+    });
 
     const c = hexToPdfRgb(ink.color);
     page.drawRectangle({
@@ -519,7 +524,9 @@ export async function buildProductionSheetPdf(input: ProductionSheetInput): Prom
 
     y -= 13;
     if (ink.note) {
-      page.drawText(pdfSafe(ink.note), { x: cols[1], y, size: 7, font, color: rgb(0.5, 0.5, 0.56) });
+      page.drawText(fitToColumn(ink.note, font, 7, W - M - cols[1]), {
+        x: cols[1], y, size: 7, font, color: rgb(0.5, 0.5, 0.56),
+      });
       y -= 11;
     }
     if (y < M + 120) break;
@@ -557,6 +564,29 @@ export async function buildProductionSheetPdf(input: ProductionSheetInput): Prom
 
   return doc.save();
 }
+
+/**
+ * Truncates text to fit a column width, appending an ellipsis.
+ *
+ * A production sheet is read at the burn table, and a long custom ink name
+ * spilling across the MESH and COVER columns makes those numbers unreadable —
+ * which are the two an operator actually needs. Losing the tail of a name is
+ * the lesser harm, and the full name is on the film itself and in the manifest.
+ */
+export function fitToColumn(text: string, font: PDFFont, size: number, maxWidth: number): string {
+  const safe = pdfSafe(text);
+  if (font.widthOfTextAtSize(safe, size) <= maxWidth) return safe;
+  let cut = safe.length;
+  while (cut > 1) {
+    cut--;
+    const candidate = `${safe.slice(0, cut).trimEnd()}...`;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) return candidate;
+  }
+  return safe.slice(0, 1);
+}
+
+/** Alias documenting the production sheet's use of the column fitter. */
+export const fitProductionSheetName = fitToColumn;
 
 /** Greedy word wrap. Returns the y position after the last drawn line. */
 function drawWrapped(

@@ -24,6 +24,16 @@ export type TransferAnalysis = Omit<ImageAnalysis, never>;
 export type WorkerRequest =
   | { type: "decode"; requestId: number; bytes: ArrayBuffer; fileName: string }
   | {
+      /** Resample artwork up to a target working resolution before separating. */
+      type: "upscale";
+      requestId: number;
+      pixels: ArrayBuffer;
+      width: number;
+      height: number;
+      widthIn: number;
+      targetDpi: number;
+    }
+  | {
       type: "separate";
       requestId: number;
       pixels: ArrayBuffer;
@@ -90,6 +100,8 @@ export type WorkerRequest =
       thumbnail: { data: ArrayBuffer; width: number; height: number } | null;
       originalThumbnail: { data: ArrayBuffer; width: number; height: number } | null;
       testPackage?: boolean;
+      sourceUpscale?: { from: number; to: number; resultingDpi: number } | null;
+      underbaseSettings?: { choke: number; strength: number; removeUnderBlack: boolean; highlightWhite: boolean } | null;
     }
   | {
       /** Runs the pre-export checks without producing an archive. */
@@ -126,6 +138,16 @@ export type WorkerResponse =
       qa: QAResult;
       similarity: { deltaE: number; ssim: number; percent: number };
       composite: ArrayBuffer;
+    }
+  | {
+      type: "upscaled";
+      requestId: number;
+      pixels: ArrayBuffer;
+      width: number;
+      height: number;
+      resultingDpi: number;
+      capped: boolean;
+      applied: boolean;
     }
   | { type: "composited"; requestId: number; rgba: ArrayBuffer }
   | { type: "inkAdjusted"; requestId: number; inkId: string; mask: ArrayBuffer }

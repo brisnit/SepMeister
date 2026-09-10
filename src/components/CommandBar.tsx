@@ -31,7 +31,7 @@ export function CommandBar({
   return (
     <section className="border-t border-ink-100 px-3 py-3">
       <div className="mb-2 flex items-center justify-between">
-        <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">Ask Sep AI</h2>
+        <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">Ask SepWiz</h2>
         <Pill>Local · deterministic</Pill>
       </div>
 
@@ -81,7 +81,7 @@ export function CommandBar({
       ) : null}
 
       <p className="mt-2 text-[10px] leading-snug text-ink-400">
-        Commands become structured operations the deterministic engine executes. Sep AI never edits pixels directly.
+        Commands become structured operations the deterministic engine executes. SepWiz never edits pixels directly.
       </p>
     </section>
   );

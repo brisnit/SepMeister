@@ -1,10 +1,11 @@
 "use client";
 
 import { useRef, useState } from "react";
-import type { ProductionSize } from "@/lib/types";
+import type { ProductionSize, SeparationPlan } from "@/lib/types";
 import { formatSize } from "@/lib/production/size";
 import { CanvasView } from "./CanvasView";
-import { Button } from "./primitives";
+import { Button, Pill } from "./primitives";
+import { ScreenSummary } from "./ScreenSummary";
 
 type ReviewLayout = "split" | "side" | "difference";
 
@@ -17,21 +18,27 @@ type ReviewLayout = "split" | "side" | "difference";
  * conversation does not belong here.
  */
 export function ReviewMode({
-  originalRgba, compositeRgba, width, height, similarity, screenCount, garmentColor, size, jobName, customer, onClose,
+  originalRgba, compositeRgba, width, height, similarity, plan, garmentColor, size,
+  jobName, customer, sepScore, verdict, warnings, onClose,
 }: {
   originalRgba: Uint8ClampedArray | null;
   compositeRgba: Uint8ClampedArray | null;
   width: number;
   height: number;
   similarity: number | null;
-  screenCount: number;
+  plan: SeparationPlan;
   garmentColor: string;
   size: ProductionSize;
   jobName: string;
   customer: string;
+  sepScore: number;
+  verdict: string;
+  warnings: string[];
   onClose: () => void;
 }) {
   const [layout, setLayout] = useState<ReviewLayout>("split");
+  const [showScreens, setShowScreens] = useState(false);
+  const screenCount = plan.inks.length;
   const [split, setSplit] = useState(50);
   const frameRef = useRef<HTMLDivElement>(null);
 
@@ -70,21 +77,61 @@ export function ReviewMode({
         <dl className="ml-auto flex shrink-0 items-center gap-5">
           {([
             ["Screens", String(screenCount)],
+            ["Recommended", String(plan.recommendedScreens)],
+            ["Limit", plan.maxScreens ? String(plan.maxScreens) : "None"],
             ["Garment", garmentColor.toUpperCase()],
             ["Size", formatSize(size)],
             ...(similarity !== null ? ([["Similarity", `${similarity}%`]] as [string, string][]) : []),
+            ["Sep Score", String(sepScore)],
           ] as [string, string][]).map(([k, v]) => (
             <div key={k}>
               <dt className="text-[10px] uppercase tracking-[0.06em] text-ink-400">{k}</dt>
               <dd className="tnum text-[13px] font-semibold text-white">{v}</dd>
             </div>
           ))}
+          <div>
+            <dt className="text-[10px] uppercase tracking-[0.06em] text-ink-400">Warnings</dt>
+            <dd className="mt-0.5">
+              {warnings.length === 0 ? <Pill tone="good">None</Pill> : <Pill tone="warn">{warnings.length}</Pill>}
+            </dd>
+          </div>
         </dl>
+
+        <button
+          type="button"
+          onClick={() => setShowScreens((v) => !v)}
+          className={`h-7 shrink-0 rounded border px-2.5 text-[12px] font-medium transition-colors ${
+            showScreens ? "border-accent bg-accent text-white" : "border-ink-700 text-ink-200 hover:bg-ink-800"
+          }`}
+        >
+          Screens
+        </button>
 
         <Button variant="ghost" size="sm" onClick={onClose} className="!text-ink-200 hover:!bg-ink-800 hover:!text-white">
           Close
         </Button>
       </header>
+
+      <div className="flex min-h-0 flex-1">
+      {showScreens ? (
+        <aside className="w-72 shrink-0 overflow-y-auto border-r border-ink-800 bg-ink-900">
+          <div className="[&_h2]:text-ink-400 [&_section]:border-ink-800 [&_.text-ink-900]:!text-white [&_.text-ink-400]:!text-ink-400">
+            <ScreenSummary plan={plan} />
+          </div>
+          {warnings.length > 0 ? (
+            <div className="border-t border-ink-800 px-3 py-3">
+              <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-400">
+                Production warnings
+              </h3>
+              <ul className="space-y-1">
+                {warnings.map((w) => (
+                  <li key={w} className="text-[11px] leading-snug text-ink-300">{w}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </aside>
+      ) : null}
 
       <div ref={frameRef} className="flex min-h-0 flex-1 items-center justify-center p-6">
         {layout === "side" ? (
@@ -129,6 +176,8 @@ export function ReviewMode({
             </div>
           </div>
         )}
+      </div>
+
       </div>
 
       <footer className="shrink-0 border-t border-ink-800 px-5 py-2.5">

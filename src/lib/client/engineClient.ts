@@ -80,6 +80,12 @@ export class EngineClient {
     );
   }
 
+  upscale(req: Omit<Extract<WorkerRequest, { type: "upscale" }>, "type" | "requestId">) {
+    return this.send<Extract<WorkerResponse, { type: "upscaled" }>>(
+      { type: "upscale", ...req }, [req.pixels],
+    );
+  }
+
   separate(
     req: Omit<Extract<WorkerRequest, { type: "separate" }>, "type" | "requestId">,
     onProgress?: (message: string) => void,

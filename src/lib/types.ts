@@ -1,4 +1,4 @@
-/** Core data model for Sep AI. Shaped so accounts/jobs can be layered on later. */
+/** Core data model for SepWiz. Shaped so accounts/jobs can be layered on later. */
 
 /**
  * Upper bound on screens in one job.
@@ -274,6 +274,15 @@ export interface AccountState {
 
 export type FeedbackOutcome = "excellent" | "good" | "needs-adjustment" | "failed";
 
+/** Would a separator commit film and emulsion to this? The headline question. */
+export type BurnVerdict = "yes" | "with-changes" | "no";
+export type QualityVerdict = "good" | "needs-edits";
+export type RegistrationVerdict = "good" | "needs-adjustment";
+export type UnderbaseVerdict = "good" | "too-heavy" | "too-light" | "wrong-coverage";
+export type OrderVerdict = "good" | "would-change";
+export type TimeSaved = "a-lot" | "some" | "no";
+export type WouldPay = "yes" | "maybe" | "no";
+
 /**
  * A record of what actually happened on press.
  *
@@ -294,6 +303,24 @@ export interface FeedbackRecord {
   changedAnything: boolean | null;
   whatChanged: string;
   notes: string;
+  /**
+   * Shop-test answers. Separate from the print-outcome fields above because
+   * these can be answered at the screen, before anything is burned -- which is
+   * the only feedback available on a first visit.
+   */
+  shopTest?: {
+    wouldBurn: BurnVerdict | null;
+    registration: RegistrationVerdict | null;
+    underbase: UnderbaseVerdict | null;
+    separations: QualityVerdict | null;
+    halftones: QualityVerdict | null;
+    printOrder: OrderVerdict | null;
+    timeSaved: TimeSaved | null;
+    /** Minutes the separator says this normally takes them, if given. */
+    normalTimeMinutes: number | null;
+    normalTimeNote: string;
+    wouldPay: WouldPay | null;
+  };
   /** Snapshot of the settings that produced the films. */
   snapshot: {
     screens: number;

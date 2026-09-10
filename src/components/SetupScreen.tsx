@@ -5,6 +5,7 @@ import type { JobMetadata, PressPreset, ProductionSettings, ProductionSize, Sepa
 import { Button, Field, SegmentedControl, Pill } from "./primitives";
 import { SepMark, type UploadedInfo } from "./UploadScreen";
 import { ProductionSizeControl } from "./ProductionSizeControl";
+import { UpscaleCard } from "./UpscaleCard";
 
 const GARMENT_PRESETS = [
   { name: "Black", hex: "#111111" },
@@ -48,6 +49,7 @@ export function SetupScreen({
   info, settings, metadata, productionSize, presets, activePresetId, marginIn,
   onChange, onMetadata, onProductionSize, onApplyPreset,
   onSeparate, busy, busyLabel, onBack, removeBackground, onRemoveBackground,
+  upscaleApplied, upscaledFrom, onUpscale, onRevertUpscale,
 }: {
   info: UploadedInfo;
   settings: ProductionSettings;
@@ -66,6 +68,10 @@ export function SetupScreen({
   onBack: () => void;
   removeBackground: boolean;
   onRemoveBackground: (v: boolean) => void;
+  upscaleApplied: boolean;
+  upscaledFrom: number | null;
+  onUpscale: () => void;
+  onRevertUpscale: () => void;
 }) {
   const [customGarment, setCustomGarment] = useState(settings.garmentColor);
   const set = <K extends keyof ProductionSettings>(key: K, value: ProductionSettings[K]) =>
@@ -79,7 +85,7 @@ export function SetupScreen({
       <header className="mb-8 flex items-center justify-between border-b border-ink-100 pb-5">
         <div className="flex items-center gap-2">
           <SepMark />
-          <span className="text-[13px] font-bold tracking-tight text-ink-900">Sep AI</span>
+          <span className="text-[13px] font-bold tracking-tight text-ink-900">SepWiz</span>
           <span className="ml-2 text-[13px] text-ink-300">/</span>
           <span className="ml-2 text-[13px] font-medium text-ink-500">Production setup</span>
         </div>
@@ -148,6 +154,18 @@ export function SetupScreen({
               marginIn={marginIn}
               onChange={onProductionSize}
             />
+            <div className="mt-2.5">
+              <UpscaleCard
+                pixelWidth={info.width}
+                pixelHeight={info.height}
+                size={productionSize}
+                applied={upscaleApplied}
+                appliedFrom={upscaledFrom}
+                busy={busy}
+                onUpscale={onUpscale}
+                onRevert={onRevertUpscale}
+              />
+            </div>
           </Field>
 
           <Field label="Garment Color" hint={settings.garmentColor.toUpperCase()}>
@@ -269,7 +287,7 @@ export function SetupScreen({
               <span className="block text-[13px] font-semibold text-ink-900">Use garment as black</span>
               <span className="mt-0.5 block text-[12px] leading-snug text-ink-500">
                 Where the artwork&rsquo;s black matches the garment, knock it out instead of printing it. Saves a
-                screen and a lot of ink. Sep AI keeps a black screen anyway if the black carries fine linework.
+                screen and a lot of ink. SepWiz keeps a black screen anyway if the black carries fine linework.
               </span>
             </span>
           </label>

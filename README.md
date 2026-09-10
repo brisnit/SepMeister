@@ -1,4 +1,4 @@
-# Sep AI
+# SepWiz
 
 Turns raster artwork into production-ready screen-print separations and
 registration-matched black film positives.
@@ -180,6 +180,25 @@ Print at 100%. Never "fit to page".
 
 ---
 
+## Resolution upscaling
+
+When artwork resolves below 300 DPI at the chosen print size, SepWiz offers to
+resample it up before separating. It is stated plainly in the UI that this
+**cannot add detail the file does not contain** — a soft original stays soft.
+
+What it genuinely fixes is a real defect. Choke, spread and despeckle are
+physical measurements converted against the working resolution, and at 143 DPI
+a 1px choke resolves to 0.48px, which **rounds to zero**. The control silently
+does nothing. Separating at 300 DPI gives those operations the granularity to
+act at all, and puts ink boundaries on a finer grid.
+
+Catmull-Rom rather than bilinear, because bilinear softens exactly the edges a
+separation depends on. Colour is interpolated in premultiplied space so
+transparent regions cannot bleed into opaque ones. Reversible in one click, and
+recorded in the job manifest so a press result can be interpreted later.
+
+A 600px file upscaled to 3600px separates in about 2.8 seconds.
+
 ## Screen counts
 
 Every count from **1 to 18**, plus no-limit (which resolves to 24). Deliberately
@@ -199,7 +218,7 @@ from *measured overlap*, so reuse lands on pairs that never touch.
 
 **Moire warnings are overlap-aware.** Raw angle proximity on a 16-colour job
 flags roughly eighteen pairs, nearly all of which never meet on the shirt —
-which trains an operator to ignore the one that mattered. Sep AI measures the
+which trains an operator to ignore the one that mattered. SepWiz measures the
 shared area and only warns when two screened inks genuinely overlap. In
 practice spot separations are largely disjoint by construction, so a correct
 16-screen job usually reports none.
@@ -226,6 +245,24 @@ times the line count. Exceeding it produces a warning with a one-click **Apply
 recommendation** that either raises mesh or pulls the line count into range.
 Nothing is ever blocked; a separator with a reason to run 65 LPI on 110 mesh
 can do exactly that.
+
+## Shop test mode
+
+A step rail — screens, underbase, halftones, print order, film QA, download —
+that walks a separation in the order it is actually reviewed. It changes no
+engine behaviour and hides no controls; each step just drives the workspace to
+the relevant view so the next thing to look at is obvious.
+
+The **before/after** surface pairs the original against the reconstruction with
+a split slider, side-by-side and difference views, plus screen count,
+recommendation, limit, garment, similarity, Sep Score and warnings. Production
+controls are deliberately absent so nothing can be nudged mid-conversation.
+
+**Test print feedback** captures whether a separator would burn the screens,
+and what they would change first — which is the single most informative signal
+available, because it is exactly where the engine's judgement diverged from a
+professional's. Exports to JSON or CSV, stored locally, no personal information
+collected beyond what someone types.
 
 ## Film QA
 

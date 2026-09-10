@@ -264,7 +264,7 @@ export function parseCommand(input: string, context: CommandContext): OperationR
   // ---- Explicitly unsupported -----------------------------------------
   if (/\b(detail|face|sharpen|enhance|redraw|fix|improve)\b/.test(text)) {
     return no(
-      "Sep AI cannot add or invent detail — separations are derived from the artwork's own pixels. " +
+      "SepWiz cannot add or invent detail — separations are derived from the artwork's own pixels. " +
       "To hold more detail, allow more screens, use a finer mesh, or supply higher-resolution artwork.",
     );
   }

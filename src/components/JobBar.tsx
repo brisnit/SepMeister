@@ -38,7 +38,7 @@ export function JobBar({
       <div className="flex items-center gap-3 px-4 py-2.5">
         <div className="flex shrink-0 items-center gap-2">
           <SepMark />
-          <span className="text-[13px] font-bold tracking-tight text-ink-900">Sep AI</span>
+          <span className="text-[13px] font-bold tracking-tight text-ink-900">SepWiz</span>
         </div>
         <span className="text-ink-200">/</span>
 

@@ -9,6 +9,7 @@ import type { OperationResult } from "@/lib/ai/operations";
 import { effectiveDpi } from "@/lib/production/size";
 import { CanvasView, maskToFilmRgba, maskToInkRgba, buildUnderbaseOverlay } from "./CanvasView";
 import { SeparationStack } from "./SeparationStack";
+import { ScreenSummary } from "./ScreenSummary";
 import { SepScorePanel } from "./SepScorePanel";
 import { CommandBar } from "./CommandBar";
 import { ExportPanel, ExportAction } from "./ExportPanel";
@@ -17,6 +18,7 @@ import { PrintOrderPanel } from "./PrintOrderPanel";
 import { UnderbasePanel, type UnderbaseView } from "./UnderbasePanel";
 import { AnglePresetPicker } from "./HalftoneControls";
 import { JobBar } from "./JobBar";
+import { DemoRail, type DemoStep } from "./DemoRail";
 import { Button, Pill } from "./primitives";
 
 export type ViewMode = "original" | "composite" | "garment" | "films";
@@ -34,6 +36,9 @@ export interface WorkspaceProps {
   activePresetId: string | null;
   storageAvailable: boolean;
   separationsCompleted: number;
+  demoMode: boolean;
+  demoStep: DemoStep;
+  sepScore: number;
   view: ViewMode;
   underbaseView: UnderbaseView;
   selectedInk: string | null;
@@ -52,6 +57,8 @@ export interface WorkspaceProps {
   highlightWhite: boolean;
   productionWarnings: string[];
   onMetadata: (next: JobMetadata) => void;
+  onDemoMode: (on: boolean) => void;
+  onDemoStep: (s: DemoStep) => void;
   onView: (v: ViewMode) => void;
   onUnderbaseView: (v: UnderbaseView) => void;
   onSelectInk: (id: string | null) => void;
@@ -140,10 +147,27 @@ export function Workspace(props: WorkspaceProps) {
         effectiveDpi={artDpi}
         onChange={props.onMetadata}
       >
+        {!props.demoMode ? (
+          <Button size="sm" onClick={() => props.onDemoMode(true)}>Shop test</Button>
+        ) : null}
         <Button size="sm" onClick={props.onOpenReview}>Review</Button>
         <Button size="sm" onClick={props.onOpenFeedback}>Test feedback</Button>
-        <Button variant="ghost" size="sm" onClick={props.onBack}>New artwork</Button>
+        <Button variant="ghost" size="sm" onClick={props.onBack}>New separation</Button>
       </JobBar>
+
+      {props.demoMode ? (
+        <DemoRail
+          step={props.demoStep}
+          plan={plan}
+          similarity={similarity}
+          sepScore={props.sepScore}
+          warningCount={productionWarnings.length}
+          onStep={props.onDemoStep}
+          onExit={() => props.onDemoMode(false)}
+          onOpenQa={props.onOpenOutputCheck}
+          onOpenReview={props.onOpenReview}
+        />
+      ) : null}
 
       <div className="flex shrink-0 items-center gap-4 border-b border-ink-100 bg-surface px-4 py-2">
         <div className="flex gap-1" role="group" aria-label="View mode">
@@ -303,6 +327,7 @@ export function Workspace(props: WorkspaceProps) {
         {/* RIGHT — separations, QA, commands, output */}
         <aside className="flex min-h-0 flex-col border-l border-ink-100 bg-surface">
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            <ScreenSummary plan={plan} onSelect={props.onSelectInk} selectedId={selectedInk} />
             <SeparationStack
               inks={plan.inks}
               selectedId={selectedInk}

@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Sep AI — Screen Print Color Separation",
+  title: "SepWiz — Screen Print Color Separation",
   description:
     "Turn raster artwork into production-ready screen print separations with registration-matched black film positives.",
 };

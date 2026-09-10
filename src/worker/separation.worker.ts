@@ -8,6 +8,7 @@
  */
 
 import { runSeparation, applyInkSettings } from "@/lib/engine/pipeline";
+import { planUpscale, applyUpscale } from "@/lib/engine/upscale";
 import { decodeInBrowser } from "@/lib/engine/browserDecode";
 import { downscaleToWorking, resolveDpi, UploadError } from "@/lib/engine/decode";
 import { compositeLayers } from "@/lib/engine/composite";
@@ -68,6 +69,20 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
             downscaled: !!scaled,
           },
           [buf(working.pixels)],
+        );
+        break;
+      }
+
+      case "upscale": {
+        const plan = planUpscale(req.width, req.height, req.widthIn, req.targetDpi);
+        const out = applyUpscale(new Uint8ClampedArray(req.pixels), req.width, req.height, plan);
+        post(
+          {
+            type: "upscaled", requestId: req.requestId,
+            pixels: buf(out.pixels), width: out.width, height: out.height,
+            resultingDpi: plan.resultingDpi, capped: plan.capped, applied: plan.needed,
+          },
+          [buf(out.pixels)],
         );
         break;
       }
@@ -175,6 +190,8 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
             ? { data: new Uint8Array(req.originalThumbnail.data), width: req.originalThumbnail.width, height: req.originalThumbnail.height }
             : null,
           testPackage: req.testPackage,
+          sourceUpscale: req.sourceUpscale,
+          underbaseSettings: req.underbaseSettings,
           onProgress: (done, total, label) =>
             post({ type: "progress", requestId: req.requestId, stage: "export", message: label, done, total }),
         });

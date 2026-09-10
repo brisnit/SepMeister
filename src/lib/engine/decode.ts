@@ -106,7 +106,7 @@ export async function decodeArtwork(
 
   if (format === "tiff") {
     const d = deps.decodeTiff(bytes);
-    if (!d) throw new UploadError("That TIFF uses a compression or layout Sep AI can't read. Try exporting as PNG.");
+    if (!d) throw new UploadError("That TIFF uses a compression or layout SepWiz can't read. Try exporting as PNG.");
     return d;
   }
 

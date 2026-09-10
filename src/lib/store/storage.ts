@@ -7,6 +7,11 @@
  * threw is unacceptable, so failures always degrade to the default.
  */
 
+/**
+ * Storage namespace. Deliberately still "sepai" after the rename to SepWiz:
+ * changing it would orphan every preset and saved job already in a shop's
+ * browser, and a cosmetic rename is not worth losing their setup over.
+ */
 const PREFIX = "sepai.v1.";
 
 export function isStorageAvailable(): boolean {

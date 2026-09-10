@@ -57,13 +57,13 @@ export function UploadScreen({
       <header className="mb-10">
         <div className="mb-8 flex items-center gap-2">
           <SepMark />
-          <span className="text-[13px] font-bold tracking-tight text-ink-900">Sep AI</span>
+          <span className="text-[13px] font-bold tracking-tight text-ink-900">SepWiz</span>
         </div>
         <h1 className="text-[34px] font-bold leading-[1.1] tracking-tight text-ink-950">
           Separate artwork for screen printing
         </h1>
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-ink-500">
-          Drop a PNG, JPG, or TIFF and Sep AI will build a press-ready separation.
+          Drop a PNG, JPG, or TIFF and SepWiz will build a press-ready separation.
         </p>
       </header>
 

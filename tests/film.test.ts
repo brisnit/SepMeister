@@ -310,6 +310,48 @@ describe("PDF text sanitization", () => {
 // Imported eagerly for the synchronous cases above.
 import { pdfSafe as pdfSafeSync } from "@/lib/film/pdf";
 
+describe("production sheet layout", () => {
+  /**
+   * A long custom ink name must not run across the MESH and COVER columns.
+   * The browser can verify the on-screen list, but nothing outside the PDF
+   * itself can see this, so it is checked against the drawn text positions.
+   */
+  it("keeps long ink names inside the INK column", async () => {
+    const { PDFDocument, StandardFonts } = await import("pdf-lib");
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+
+    // Column geometry from buildProductionSheetPdf: INK starts at M+24 and
+    // TYPE at M+132, so the name has 108pt minus padding to live in.
+    const available = 132 - 24 - 6;
+    const { fitProductionSheetName } = await import("@/lib/film/pdf");
+
+    const long = "Extremely Long Custom Pantone Ink Name For Layout Testing";
+    const fitted = fitProductionSheetName(long, font, 9, available);
+    expect(font.widthOfTextAtSize(fitted, 9)).toBeLessThanOrEqual(available);
+    expect(fitted).toMatch(/^Extremely/);
+    expect(fitted.length).toBeLessThan(long.length);
+  });
+
+  it("leaves names that already fit untouched", async () => {
+    const { PDFDocument, StandardFonts } = await import("pdf-lib");
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const { fitProductionSheetName } = await import("@/lib/film/pdf");
+    for (const name of ["Navy", "White Underbase", "Burnt Orange"]) {
+      expect(fitProductionSheetName(name, font, 9, 102)).toBe(name);
+    }
+  });
+
+  it("renders a fifteen-screen sheet without failing", async () => {
+    const res = await bundle();
+    const files = unzipSync(res.zip);
+    const sheet = files["production-sheet.pdf"];
+    expect(new TextDecoder().decode(sheet.subarray(0, 5))).toBe("%PDF-");
+    expect(sheet.length).toBeGreaterThan(2000);
+  });
+});
+
 describe("registration is identical across every film", () => {
   /**
    * Extracts a page's drawing operations with the per-film content removed.
