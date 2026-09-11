@@ -55,9 +55,9 @@ export function UploadScreen({
   return (
     <main className="mx-auto flex min-h-screen max-w-3xl flex-col justify-center px-6 py-16">
       <header className="mb-10">
-        <div className="mb-8 flex items-center gap-2">
-          <SepMark />
-          <span className="text-[13px] font-bold tracking-tight text-ink-900">SepWiz</span>
+        <div className="mb-8 flex items-center gap-2.5">
+          <SepMark size={34} />
+          <span className="text-[17px] font-bold tracking-tight text-ink-900">SepWiz</span>
         </div>
         <h1 className="text-[34px] font-bold leading-[1.1] tracking-tight text-ink-950">
           Separate artwork for screen printing
@@ -163,11 +163,27 @@ function ArtworkSummary({ info }: { info: UploadedInfo }) {
   );
 }
 
-export function SepMark() {
+/**
+ * The SepWiz mark.
+ *
+ * Served from a 96px asset so it stays crisp on a retina display at the sizes
+ * used here, without shipping the full-resolution artwork to every visitor.
+ * Decorative only — the wordmark beside it carries the name for screen
+ * readers, so the image is hidden from the accessibility tree rather than
+ * repeating it.
+ */
+export function SepMark({ size = 22 }: { size?: number }) {
   return (
-    <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
-      <rect x="1" y="1" width="11" height="11" rx="1.5" fill="none" stroke="#5d5fef" strokeWidth="1.6" />
-      <rect x="6" y="6" width="11" height="11" rx="1.5" fill="none" stroke="#16162e" strokeWidth="1.6" />
-    </svg>
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src="/sepwiz-mark.png"
+      alt=""
+      aria-hidden="true"
+      width={size}
+      height={size}
+      className="shrink-0 select-none object-contain"
+      style={{ width: size, height: size }}
+      draggable={false}
+    />
   );
 }

@@ -32,8 +32,10 @@ sep-ai-feedback-*.json
 
 # Reference imagery dropped in locally. brandassets/UI.png is a watermarked
 # stock image the app does not reference; committing watermarked stock to a
-# hosted repo carries licensing risk. Delete this line to include it.
-brandassets/
+# hosted repo carries licensing risk. The SepWiz mark is our own artwork and
+# is kept, since the shipped icons are generated from it.
+brandassets/*
+!brandassets/SepWizLogo.png
 
 # OS and editor
 .DS_Store
