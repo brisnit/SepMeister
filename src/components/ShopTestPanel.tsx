@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type {
   BurnVerdict, FeedbackRecord, OrderVerdict, QualityVerdict,
-  RegistrationVerdict, TimeSaved, UnderbaseVerdict, WouldPay,
+  RegistrationVerdict, ShopOutputSetup, TimeSaved, UnderbaseVerdict, WouldPay,
 } from "@/lib/types";
 import { Button, Pill } from "./primitives";
 
@@ -21,6 +21,15 @@ export interface ShopTestAnswers {
   modifiedBeforePrinting: boolean | null;
   whatChanged: string;
   notes: string;
+  /**
+   * The shop's actual output chain.
+   *
+   * The most important thing to capture before any direct-output work: nothing
+   * about driving a film printer can be designed without knowing the printer,
+   * the RIP settings and the density configuration currently producing good
+   * film.
+   */
+  output: ShopOutputSetup;
 }
 
 export function emptyAnswers(): ShopTestAnswers {
@@ -29,6 +38,10 @@ export function emptyAnswers(): ShopTestAnswers {
     halftones: null, printOrder: null, timeSaved: null, normalTimeMinutes: null,
     normalTimeNote: "", wouldPay: null, modifiedBeforePrinting: null,
     whatChanged: "", notes: "",
+    output: {
+      printerManufacturer: "", printerModel: "", rip: "AccuRIP Emerald",
+      outputResolution: "", media: "", densitySettings: "", otherRipSettings: "",
+    },
   };
 }
 
@@ -49,6 +62,7 @@ export function answersFromRecord(r: FeedbackRecord | null): ShopTestAnswers {
     modifiedBeforePrinting: r.changedAnything ?? null,
     whatChanged: r.whatChanged ?? "",
     notes: r.notes ?? "",
+    output: r.outputSetup ?? emptyAnswers().output,
   };
 }
 
@@ -59,7 +73,8 @@ export function hasAnswers(a: ShopTestAnswers): boolean {
     a.separations !== null || a.halftones !== null || a.printOrder !== null ||
     a.timeSaved !== null || a.wouldPay !== null || a.modifiedBeforePrinting !== null ||
     a.normalTimeMinutes !== null || a.normalTimeNote.trim() !== "" ||
-    a.whatChanged.trim() !== "" || a.notes.trim() !== ""
+    a.whatChanged.trim() !== "" || a.notes.trim() !== "" ||
+    Object.entries(a.output).some(([k, v]) => k !== "rip" && v.trim() !== "")
   );
 }
 
@@ -231,6 +246,43 @@ export function ShopTestPanel({
               />
             </div>
           ) : null}
+
+          <div className="border-t border-ink-50 pt-3.5">
+            <span className="mb-1.5 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">
+              Output setup
+            </span>
+            <p className="mb-2 text-[10px] leading-snug text-ink-400">
+              What is producing good film today. Nothing about direct printer output can be designed
+              without this.
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                ["printerManufacturer", "Printer make"],
+                ["printerModel", "Printer model"],
+                ["rip", "RIP"],
+                ["outputResolution", "Output resolution"],
+                ["media", "Media"],
+                ["densitySettings", "Ink / density"],
+              ] as [keyof ShopOutputSetup, string][]).map(([key, label]) => (
+                <label key={key} className="block">
+                  <span className="mb-0.5 block text-[10px] text-ink-400">{label}</span>
+                  <input
+                    value={answers.output[key]}
+                    onChange={(e) => set("output", { ...answers.output, [key]: e.target.value })}
+                    className="ctl h-7 w-full rounded px-2 text-[12px] outline-none focus:border-accent"
+                  />
+                </label>
+              ))}
+            </div>
+            <label className="mt-2 block">
+              <span className="mb-0.5 block text-[10px] text-ink-400">Other RIP settings</span>
+              <input
+                value={answers.output.otherRipSettings}
+                onChange={(e) => set("output", { ...answers.output, otherRipSettings: e.target.value })}
+                className="ctl h-7 w-full rounded px-2 text-[12px] outline-none focus:border-accent"
+              />
+            </label>
+          </div>
 
           <label className="block border-t border-ink-50 pt-3.5">
             <span className="mb-1 block text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-500">

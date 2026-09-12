@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
-  ExportSettings, FeedbackRecord, FilmQAReport, HalftoneSettings,
+  ExportSettings, FeedbackRecord, FilmQAReport, HalftoneSettings, UnderbaseRelationship,
   ImageAnalysis, InkSeparation, JobMetadata, PressPreset, ProductionSettings,
   ProductionSize, QAResult, SeparationPlan,
 } from "@/lib/types";
@@ -12,6 +12,10 @@ import { generateDemoArtwork } from "@/lib/demo/artwork";
 import { encodePng } from "@/lib/film/png";
 import { collectProductionWarnings } from "@/lib/film/bundle";
 import { applyPrintOrder } from "@/lib/engine/printOrder";
+import { contributionFor } from "@/lib/engine/pipeline";
+import { inspectPoint, type InspectionResult } from "@/lib/spot/inspect";
+import type { LoupePower } from "@/components/InspectionCanvas";
+import type { ChannelRender } from "@/components/SpotChannels";
 import { defaultProductionSize, effectiveDpi } from "@/lib/production/size";
 import { TARGET_WORKING_DPI } from "@/lib/engine/upscale";
 import {
@@ -106,6 +110,13 @@ export default function Page() {
   const [account, setAccount] = useState(defaultAccount);
   const [feedback, setFeedback] = useState<FeedbackRecord[]>([]);
 
+  const [inspection, setInspection] = useState<InspectionResult | null>(null);
+  const [loupeOn, setLoupeOn] = useState(false);
+  const [loupePower, setLoupePower] = useState<LoupePower>(8);
+  const [channelRender, setChannelRender] = useState<ChannelRender>("ink");
+  const [soloInk, setSoloInk] = useState<string | null>(null);
+  const [underbaseBusy, setUnderbaseBusy] = useState(false);
+  const [spotBusy, setSpotBusy] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [demoStep, setDemoStep] = useState<DemoStep>("screens");
   const [showOutputCheck, setShowOutputCheck] = useState(false);
@@ -982,6 +993,7 @@ export default function Page() {
         normalTimeNote: answers.normalTimeNote,
         wouldPay: answers.wouldPay,
       },
+      outputSetup: answers.output,
       snapshot: {
         screens: inks.length,
         garmentColor: plan.garmentColor,
@@ -1070,6 +1082,121 @@ export default function Page() {
     setInfo((i) => (i ? { ...i, width: original.width, height: original.height } : i));
     setNotice("Using the original artwork resolution.");
   }, []);
+
+  /**
+   * Recomputes only the base after a per-ink relationship changes.
+   *
+   * Deliberately not a full re-separation: "no white under the navy" is an
+   * underbase decision, and re-clustering the artwork to answer it could
+   * change which inks exist — the opposite of what a separator adjusting the
+   * base wants.
+   */
+  const applyUnderbaseRebuild = useCallback(async (inks: InkSeparation[]) => {
+    const source = sourceRef.current;
+    if (!source) return;
+    setUnderbaseBusy(true);
+    try {
+      const res = await client().rebuildUnderbase({
+        inks: inks.map((ink) => ({ ...ink, mask: ink.mask.slice().buffer as ArrayBuffer })),
+        width: source.width,
+        height: source.height,
+        dpi: effectiveDpi(source.width, productionSize),
+        options: { chokePx: underbaseChoke, strength: underbaseStrength, removeUnderBlack },
+      });
+      const mask = new Uint8ClampedArray(res.mask);
+      setPlan((p) => {
+        if (!p) return p;
+        const hasBase = p.inks.some((i) => i.type === "underbase");
+        const next = hasBase
+          ? p.inks.map((i) =>
+              i.type === "underbase"
+                ? { ...i, mask, coverage: res.coverage, meanDensity: res.meanDensity, note: res.note }
+                : i,
+            )
+          : [
+              {
+                id: "underbase", name: "White Underbase", displayColor: "#ffffff",
+                type: "underbase" as const, order: -1, visible: true,
+                coverage: res.coverage, meanDensity: res.meanDensity, mesh: 110,
+                settings: { threshold: 0, gain: 1, choke: underbaseChoke, spread: 0 },
+                halftone: { enabled: false, lpi: halftone.lpi, angle: 22.5, shape: halftone.shape },
+                underbase: "none" as const, underbaseContribution: 0,
+                mask, note: res.note,
+              },
+              ...p.inks,
+            ];
+        const ordered = next.map((i, idx) => ({ ...i, order: idx }));
+        baseMasksRef.current.set("underbase", new Uint8ClampedArray(mask));
+        void recomposite(ordered, p.garmentColor);
+        return { ...p, inks: ordered, printOrder: ordered.map((i) => i.id) };
+      });
+      setQaReport(null);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setUnderbaseBusy(false);
+    }
+  }, [productionSize, underbaseChoke, underbaseStrength, removeUnderBlack, halftone, recomposite, fail]);
+
+  const onUnderbaseRelationship = useCallback((id: string, rel: UnderbaseRelationship) => {
+    const current = plan;
+    if (!current) return;
+    const inks = current.inks.map((i) =>
+      i.id === id ? { ...i, underbase: rel, underbaseContribution: contributionFor(rel) } : i,
+    );
+    setPlan({ ...current, inks });
+    void applyUnderbaseRebuild(inks);
+  }, [plan, applyUnderbaseRebuild]);
+
+  const onRemoveUnderbase = useCallback(() => {
+    const current = plan;
+    if (!current) return;
+    if (!window.confirm("Remove the white underbase from this job?\n\nColours will print straight onto the garment.")) return;
+    const inks = current.inks.filter((i) => i.type !== "underbase").map((i, idx) => ({ ...i, order: idx }));
+    baseMasksRef.current.delete("underbase");
+    setPlan({ ...current, inks, printOrder: inks.map((i) => i.id) });
+    void recomposite(inks, current.garmentColor);
+    setQaReport(null);
+    setNotice("Underbase removed. Colours will print directly onto the garment.");
+  }, [plan, recomposite]);
+
+  const onRegenerateUnderbase = useCallback(() => {
+    if (!plan) return;
+    void applyUnderbaseRebuild(plan.inks);
+  }, [plan, applyUnderbaseRebuild]);
+
+  /** Named-spot PDF, for a RIP rather than a film printer. */
+  const onSpotPdf = useCallback(async () => {
+    const source = sourceRef.current;
+    if (!plan || !source) return;
+    setSpotBusy(true);
+    try {
+      const res = await client().spotPdf({
+        plan: { ...plan, inks: plan.inks.map(({ mask: _m, ...rest }) => rest) },
+        masks: plan.inks.map((i) => i.mask.slice().buffer as ArrayBuffer),
+        metadata,
+        productionSize,
+        exportSettings,
+        width: source.width,
+        height: source.height,
+        applyHalftones: plan.inks.some((i) => i.halftone.enabled),
+      });
+      const blob = new Blob([res.bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      setNotice(`Spot PDF written with ${res.plateNames.length} named plates: ${res.plateNames.join(", ")}.`);
+    } catch (err) {
+      fail(err);
+    } finally {
+      setSpotBusy(false);
+    }
+  }, [plan, metadata, productionSize, exportSettings, fail]);
 
   const reset = useCallback(() => {
     // Several jobs get tested back to back, so this runs often. Losing an
@@ -1222,6 +1349,13 @@ export default function Page() {
         demoMode={demoMode}
         demoStep={demoStep}
         sepScore={qa.score}
+        inspection={inspection}
+        loupeOn={loupeOn}
+        loupePower={loupePower}
+        channelRender={channelRender}
+        soloInk={soloInk}
+        underbaseBusy={underbaseBusy}
+        spotBusy={spotBusy}
         view={view}
         underbaseView={underbaseView}
         selectedInk={selectedInk}
@@ -1242,6 +1376,21 @@ export default function Page() {
         onMetadata={setMetadata}
         onDemoMode={(on) => { setDemoMode(on); if (on) onDemoStep("screens"); }}
         onDemoStep={onDemoStep}
+        onHoverPoint={(p) => {
+          if (!p || !plan) { setInspection(null); return; }
+          // Inspect only what the operator can actually see, so the readout
+          // never reports a hidden plate.
+          const visible = plan.inks.filter((i) => i.visible && (!soloInk || i.id === soloInk));
+          setInspection(inspectPoint(visible, source.width, source.height, p.x, p.y, exportSettings.filmDpi));
+        }}
+        onLoupe={setLoupeOn}
+        onLoupePower={setLoupePower}
+        onChannelRender={setChannelRender}
+        onSolo={setSoloInk}
+        onUnderbaseRelationship={onUnderbaseRelationship}
+        onRemoveUnderbase={onRemoveUnderbase}
+        onRegenerateUnderbase={onRegenerateUnderbase}
+        onSpotPdf={onSpotPdf}
         onView={setView}
         onUnderbaseView={setUnderbaseView}
         onSelectInk={setSelectedInk}

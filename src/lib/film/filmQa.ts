@@ -9,7 +9,7 @@
  */
 
 import { isMonochrome } from "./render";
-import { computeFilmLabelBox, type TextMeasurer } from "./pdf";
+import { computeSpecBlock, type TextMeasurer } from "./pdf";
 import { halftoneMask } from "@/lib/engine/halftone";
 import { resampleMask } from "./resample";
 import { halftoneQuality } from "@/lib/engine/halftone";
@@ -141,8 +141,12 @@ export function runFilmQa(input: FilmQaInput, measure: TextMeasurer): FilmQARepo
 }
 
 /**
- * Verifies no film's label will be drawn over the artwork or a registration
- * target, for every ink name in the job.
+ * Verifies no film's spec block will be drawn over the artwork or a
+ * registration target, for every ink name in the job.
+ *
+ * Checked per ink because names differ in length: a block that clears the
+ * targets for "Navy" can cross one for a long custom name, which would break
+ * registration on some films of a job but not others.
  */
 function labelCheck(input: FilmQaInput, measure: TextMeasurer): FilmQACheck {
   const { layout, plan } = input;
@@ -152,40 +156,42 @@ function labelCheck(input: FilmQaInput, measure: TextMeasurer): FilmQACheck {
   let checked = 0;
 
   const inks = [...plan.inks].sort((a, b) => a.order - b.order);
+  const artTop = layout.artYPt + layout.artHeightPt;
+
   for (let i = 0; i < inks.length; i++) {
-    const box = computeFilmLabelBox(
+    const block = computeSpecBlock(
       layout,
       {
-        jobName: "job", customer: "", index: i + 1, total: inks.length,
+        jobName: "JOB NAME", customer: "", index: i + 1, total: inks.length,
         inkName: inks[i].name, inkColor: inks[i].displayColor, mesh: inks[i].mesh,
-        sizeText: "", scalePercent: 100, halftone: null,
+        sizeText: "00.00 x 00.00 in", scalePercent: 100, halftone: null,
       },
       measure,
     );
-    if (!box) continue;
+    if (!block) continue;
     checked++;
-    if (!box.bounds) continue;
+    if (!block.bounds) continue;
 
-    if (box.bounds.y1 > layout.artYPt) {
-      worst = `${inks[i].name} label reaches the artwork area`;
+    if (block.bounds.y0 < artTop) {
+      worst = `${inks[i].name} spec block reaches the artwork area`;
       break;
     }
     for (const m of layout.registration) {
       const reach = Math.max(m.radius, m.armLength);
       const overlaps =
-        box.bounds.x1 > m.cx - reach && box.bounds.x0 < m.cx + reach &&
-        box.bounds.y1 > m.cy - reach && box.bounds.y0 < m.cy + reach;
+        block.bounds.x1 > m.cx - reach && block.bounds.x0 < m.cx + reach &&
+        block.bounds.y1 > m.cy - reach && block.bounds.y0 < m.cy + reach;
       if (overlaps) {
-        worst = `${inks[i].name} label overlaps a registration target`;
+        worst = `${inks[i].name} spec block overlaps a registration target`;
         break;
       }
     }
     if (worst) break;
   }
 
-  if (worst) return check("labels", "Labels clear", "fail", worst);
-  if (checked === 0) return check("labels", "Labels clear", "warn", "Artboard too small to label");
-  return check("labels", "Labels clear", "pass", `${checked} labels clear of artwork and marks`);
+  if (worst) return check("labels", "Specs clear", "fail", worst);
+  if (checked === 0) return check("labels", "Specs clear", "warn", "Artboard too small for a spec block");
+  return check("labels", "Specs clear", "pass", `${checked} spec blocks clear of artwork and marks`);
 }
 
 /**

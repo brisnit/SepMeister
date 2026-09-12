@@ -116,6 +116,16 @@ export class EngineClient {
     );
   }
 
+  rebuildUnderbase(req: Omit<Extract<WorkerRequest, { type: "rebuildUnderbase" }>, "type" | "requestId">) {
+    return this.send<Extract<WorkerResponse, { type: "underbaseRebuilt" }>>(
+      { type: "rebuildUnderbase", ...req }, [],
+    );
+  }
+
+  spotPdf(req: Omit<Extract<WorkerRequest, { type: "spotPdf" }>, "type" | "requestId">) {
+    return this.send<Extract<WorkerResponse, { type: "spotPdfBuilt" }>>({ type: "spotPdf", ...req }, []);
+  }
+
   filmQa(req: Omit<Extract<WorkerRequest, { type: "filmQa" }>, "type" | "requestId">) {
     return this.send<Extract<WorkerResponse, { type: "filmQaReport" }>>({ type: "filmQa", ...req }, []);
   }

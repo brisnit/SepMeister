@@ -29,6 +29,9 @@ export interface FilmLayout {
   registration: RegMark[];
   centerMarks: CenterMark[];
   cropMarks: CropMark[];
+  /** Stroke width for registration artwork, in points. */
+  markStroke: number;
+  registrationLayout: RegistrationLayout;
 }
 
 /** A registration target: circle with a cross extending past it. */
@@ -37,7 +40,32 @@ export interface RegMark {
   cy: number;
   radius: number;
   armLength: number;
+  /** Where this target sits, so renderers and tests can reason about layout. */
+  position: "top-left" | "top-center" | "top-right" | "bottom-center" | "bottom-left" | "bottom-right" | "left-center" | "right-center";
 }
+
+/**
+ * Registration target arrangement.
+ *
+ * "t-shape" is what came back from the shop: three targets across the top and
+ * one at the bottom centre, forming a T. The lower corners are dropped because
+ * on press they sit where the platen and the operator's hands are, and a mark
+ * you cannot see is a mark you cannot align to.
+ *
+ * "corners" is the earlier eight-target arrangement, kept for jobs that key
+ * off the lower corners.
+ */
+export type RegistrationLayout = "t-shape" | "corners";
+
+/**
+ * Line weight for registration artwork.
+ *
+ * Bold is the default because a hairline target is hard to see through a
+ * screen mesh under shop lighting. The weight is bounded against the target
+ * radius so the circle never closes into a blob and the cross intersection
+ * stays a precise point.
+ */
+export type RegistrationWeight = "normal" | "bold";
 
 /** A center-line tick on one edge of the artwork bounds. */
 export interface CenterMark {
@@ -67,6 +95,8 @@ export interface LayoutOptions {
   includeRegistration: boolean;
   includeCenterMarks: boolean;
   includeCropMarks: boolean;
+  registrationLayout?: RegistrationLayout;
+  registrationWeight?: RegistrationWeight;
 }
 
 export function buildLayout(opts: LayoutOptions): FilmLayout {
@@ -84,24 +114,49 @@ export function buildLayout(opts: LayoutOptions): FilmLayout {
 
   // Marks sit centered in the margin band, clear of the artwork.
   const markInset = marginPt / 2;
-  const radius = Math.min(8, marginPt * 0.16);
-  const armLength = radius * 2.1;
+  const weight: RegistrationWeight = opts.registrationWeight ?? "bold";
+  const baseStroke = weight === "bold" ? 1.25 : 0.5;
 
+  // A bold stroke on a small target closes the circle into a dot. Growing the
+  // radius with the stroke keeps the ring open and the centre readable.
+  const radius = Math.max(Math.min(9, marginPt * 0.18), baseStroke * 3.5);
+  const armLength = radius * 2.2;
+  // And cap the stroke against the radius actually achieved, so a very tight
+  // margin cannot produce a blob.
+  const markStroke = Math.min(baseStroke, radius / 3.5);
+
+  const registrationLayout: RegistrationLayout = opts.registrationLayout ?? "t-shape";
   const registration: RegMark[] = [];
+
   if (opts.includeRegistration) {
     const left = markInset;
     const right = boardWidthPt - markInset;
     const bottom = markInset;
     const top = boardHeightPt - markInset;
-    // Four corners plus mid-edge targets, which is what most manual and
-    // semi-automatic presses key off.
     const cx = boardWidthPt / 2;
     const cy = boardHeightPt / 2;
-    for (const [x, y] of [
-      [left, bottom], [right, bottom], [left, top], [right, top],
-      [cx, bottom], [cx, top], [left, cy], [right, cy],
-    ]) {
-      registration.push({ cx: x, cy: y, radius, armLength });
+
+    const places: [number, number, RegMark["position"]][] =
+      registrationLayout === "t-shape"
+        ? [
+            [left, top, "top-left"],
+            [cx, top, "top-center"],
+            [right, top, "top-right"],
+            [cx, bottom, "bottom-center"],
+          ]
+        : [
+            [left, bottom, "bottom-left"],
+            [right, bottom, "bottom-right"],
+            [left, top, "top-left"],
+            [right, top, "top-right"],
+            [cx, bottom, "bottom-center"],
+            [cx, top, "top-center"],
+            [left, cy, "left-center"],
+            [right, cy, "right-center"],
+          ];
+
+    for (const [x, y, position] of places) {
+      registration.push({ cx: x, cy: y, radius, armLength, position });
     }
   }
 
@@ -157,7 +212,14 @@ export function buildLayout(opts: LayoutOptions): FilmLayout {
     registration,
     centerMarks,
     cropMarks,
+    markStroke,
+    registrationLayout,
   };
+}
+
+/** Total reach of a target from its centre, including the cross arms. */
+export function markReach(m: RegMark): number {
+  return Math.max(m.radius, m.armLength);
 }
 
 /** Human-readable artwork size, e.g. `11.00 x 14.00 in`. */

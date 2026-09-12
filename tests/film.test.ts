@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { unzipSync } from "fflate";
 import { runSeparation } from "@/lib/engine/pipeline";
 import { generateDemoArtwork } from "@/lib/demo/artwork";
-import { buildLayout, PT_PER_IN } from "@/lib/film/layout";
+import { buildLayout, markReach, PT_PER_IN } from "@/lib/film/layout";
 import { buildExportBundle } from "@/lib/film/bundle";
 import { maskToFilmGray, isMonochrome, filmInkArea, renderFilmPng } from "@/lib/film/render";
 import { decodePng, encodePng } from "@/lib/film/png";
@@ -55,7 +55,8 @@ describe("7. registration mark consistency", () => {
     const a = buildLayout(opts);
     const b = buildLayout(opts);
     expect(a).toEqual(b);
-    expect(a.registration).toHaveLength(8);
+    // T-shape: three across the top plus one at bottom centre.
+    expect(a.registration).toHaveLength(4);
     expect(a.centerMarks).toHaveLength(4);
     expect(a.cropMarks).toHaveLength(8);
   });
@@ -146,7 +147,7 @@ describe("8. export dimensions", () => {
     const res = await bundle();
     const files = unzipSync(res.zip);
     const manifest = JSON.parse(new TextDecoder().decode(files["job-manifest.json"]));
-    expect(manifest.film.registrationMarks).toBe(8);
+    expect(manifest.film.registrationMarks).toBe(4);
     expect(manifest.film.artboardWidthPt).toBeCloseTo(res.layout.boardWidthPt, 6);
     expect(manifest.screens).toHaveLength(OUT.plan.inks.length);
   });
@@ -467,22 +468,121 @@ describe("registration is identical across every film", () => {
   });
 });
 
-describe("film label never overprints a registration mark", () => {
+describe("T-shaped registration layout", () => {
+  const layout = (over: Partial<Parameters<typeof buildLayout>[0]> = {}) =>
+    buildLayout({
+      pixelWidth: 3000, pixelHeight: 3600, dpi: 300, marginIn: 0.75,
+      includeRegistration: true, includeCenterMarks: true, includeCropMarks: true,
+      ...over,
+    });
+
+  it("has no bottom corner targets", () => {
+    // Shop feedback: on press the lower corners sit under the platen and the
+    // operator's hands, so a mark there cannot be aligned to.
+    const positions = layout().registration.map((m) => m.position);
+    expect(positions).not.toContain("bottom-left");
+    expect(positions).not.toContain("bottom-right");
+  });
+
+  it("keeps three across the top and one at bottom centre", () => {
+    const positions = layout().registration.map((m) => m.position).sort();
+    expect(positions).toEqual(["bottom-center", "top-center", "top-left", "top-right"]);
+  });
+
+  it("places the top row at one height and the stem on the centre line", () => {
+    const marks = layout().registration;
+    const top = marks.filter((m) => m.position.startsWith("top"));
+    expect(new Set(top.map((m) => m.cy.toFixed(6))).size).toBe(1);
+
+    const board = layout();
+    const stem = marks.find((m) => m.position === "bottom-center")!;
+    const centre = marks.find((m) => m.position === "top-center")!;
+    expect(stem.cx).toBeCloseTo(board.boardWidthPt / 2, 6);
+    expect(centre.cx).toBeCloseTo(stem.cx, 6);
+  });
+
+  it("still offers the legacy eight-target arrangement", () => {
+    const corners = layout({ registrationLayout: "corners" });
+    expect(corners.registration).toHaveLength(8);
+    expect(corners.registration.map((m) => m.position)).toContain("bottom-left");
+  });
+
+  it("keeps every target clear of the artwork", () => {
+    for (const marginIn of [0.4, 0.75, 1.5]) {
+      const l = layout({ marginIn });
+      const x0 = l.artXPt, y0 = l.artYPt;
+      const x1 = l.artXPt + l.artWidthPt, y1 = l.artYPt + l.artHeightPt;
+      for (const m of l.registration) {
+        const reach = markReach(m);
+        const overlaps = m.cx + reach > x0 && m.cx - reach < x1 && m.cy + reach > y0 && m.cy - reach < y1;
+        expect(overlaps, `${m.position} at ${marginIn}in margin`).toBe(false);
+      }
+    }
+  });
+});
+
+describe("bold registration marks", () => {
+  const mk = (weight: "normal" | "bold", marginIn = 0.75) =>
+    buildLayout({
+      pixelWidth: 3000, pixelHeight: 3000, dpi: 300, marginIn,
+      includeRegistration: true, includeCenterMarks: true, includeCropMarks: true,
+      registrationWeight: weight,
+    });
+
+  it("defaults to bold", () => {
+    const dflt = buildLayout({
+      pixelWidth: 3000, pixelHeight: 3000, dpi: 300, marginIn: 0.75,
+      includeRegistration: true, includeCenterMarks: true, includeCropMarks: true,
+    });
+    expect(dflt.markStroke).toBe(mk("bold").markStroke);
+    expect(dflt.markStroke).toBeGreaterThan(mk("normal").markStroke);
+  });
+
+  it("is visibly heavier than normal", () => {
+    expect(mk("bold").markStroke).toBeGreaterThanOrEqual(mk("normal").markStroke * 2);
+  });
+
+  it("never closes the ring into a blob", () => {
+    // The stroke straddles the circle path, so the open centre is
+    // radius*2 - stroke. It has to stay a clearly visible hole.
+    for (const marginIn of [0.4, 0.5, 0.75, 1, 1.5]) {
+      for (const weight of ["normal", "bold"] as const) {
+        const l = mk(weight, marginIn);
+        const m = l.registration[0];
+        const openDiameter = m.radius * 2 - l.markStroke;
+        expect(openDiameter, `${weight} at ${marginIn}in`).toBeGreaterThan(l.markStroke * 4);
+      }
+    }
+  });
+
+  it("keeps the cross arms reaching past the ring", () => {
+    for (const weight of ["normal", "bold"] as const) {
+      const m = mk(weight).registration[0];
+      expect(m.armLength).toBeGreaterThan(m.radius);
+    }
+  });
+
+  it("gives every target identical geometry", () => {
+    const l = mk("bold");
+    const shapes = new Set(l.registration.map((m) => `${m.radius}:${m.armLength}`));
+    expect(shapes.size).toBe(1);
+  });
+});
+
+describe("spec block never overprints a registration mark", () => {
   /**
-   * A label drawn across a registration target destroys it, and because ink
-   * names differ in length it breaks that target on some films of a job but
-   * not others — the films then disagree on exactly the marks used to line
-   * them up. This is checked geometrically rather than by comparing drawing
-   * operators, because the operators are identical; only the rendering
-   * collides.
+   * A spec line drawn across a registration target destroys it, and because
+   * ink names differ in length it would break that target on some films of a
+   * job but not others — leaving the set disagreeing on exactly the marks used
+   * to align them.
    */
   async function assertNoCollision(opts: {
     pixelWidth: number; pixelHeight: number; dpi: number; marginIn: number;
-    inkName: string; jobName: string; index: number; total: number;
+    inkName: string; jobName: string; customer?: string; index: number; total: number;
   }) {
     const { PDFDocument, StandardFonts } = await import("pdf-lib");
-    const { buildLayout: mkLayout, describeSize: sizeOf } = await import("@/lib/film/layout");
-    const { computeFilmLabelBox } = await import("@/lib/film/pdf");
+    const { buildLayout: mkLayout, describeSize: sizeOf, markReach } = await import("@/lib/film/layout");
+    const { computeSpecBlock, measurerFromFonts } = await import("@/lib/film/pdf");
 
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -494,68 +594,126 @@ describe("film label never overprints a registration mark", () => {
       includeRegistration: true, includeCenterMarks: true, includeCropMarks: true,
     });
 
-    const { measurerFromFonts } = await import("@/lib/film/pdf");
-    const box = computeFilmLabelBox(layout, {
-      jobName: opts.jobName, index: opts.index, total: opts.total,
+    const block = computeSpecBlock(layout, {
+      jobName: opts.jobName, customer: opts.customer ?? "", index: opts.index, total: opts.total,
       inkName: opts.inkName, inkColor: "#000000", mesh: 156,
-      sizeText: sizeOf(layout), scalePercent: 100, halftone: null,
+      sizeText: sizeOf(layout), scalePercent: 100, halftone: "45 LPI / 52.5° / round",
     }, measurerFromFonts(font, bold));
 
-    if (!box || !box.bounds) return; // no label drawn at all is safe
-    expect(box.bounds.x1).toBeLessThanOrEqual(box.rightBound + 0.01);
+    if (!block || !block.bounds) return; // no block drawn at all is safe
+
+    // Inside the sheet and clear of the artwork.
+    expect(block.bounds.x0).toBeGreaterThanOrEqual(block.leftBound - 0.01);
+    expect(block.bounds.x1).toBeLessThanOrEqual(layout.boardWidthPt);
+    expect(block.bounds.y0).toBeGreaterThanOrEqual(layout.artYPt + layout.artHeightPt - 0.01);
+    expect(block.bounds.y1).toBeLessThanOrEqual(layout.boardHeightPt);
 
     for (const m of layout.registration) {
-      const reach = Math.max(m.radius, m.armLength);
+      const reach = markReach(m);
       const overlaps =
-        box.bounds.x1 > m.cx - reach &&
-        box.bounds.x0 < m.cx + reach &&
-        box.bounds.y1 > m.cy - reach &&
-        box.bounds.y0 < m.cy + reach;
-      expect(overlaps, `label "${box.title}" overlaps mark at (${m.cx.toFixed(1)}, ${m.cy.toFixed(1)})`).toBe(false);
+        block.bounds.x1 > m.cx - reach && block.bounds.x0 < m.cx + reach &&
+        block.bounds.y1 > m.cy - reach && block.bounds.y0 < m.cy + reach;
+      expect(overlaps, `spec block overlaps the ${m.position} target`).toBe(false);
     }
   }
 
   it("keeps clear on a small artboard with a long ink name", async () => {
-    // 600px at 300 DPI = 2in artwork; the regression case.
     await assertNoCollision({
       pixelWidth: 600, pixelHeight: 600, dpi: 300, marginIn: 0.75,
       inkName: "White Underbase", jobName: "badge", index: 1, total: 5,
     });
   });
 
-  it("keeps clear across a range of board sizes and ink names", async () => {
+  it("keeps clear across board sizes, ink names and screen counts", async () => {
     const names = ["Black", "White Underbase", "Athletic Gold", "Extremely Long Custom Ink Name For Testing"];
     const sizes: [number, number][] = [[400, 400], [600, 600], [1200, 900], [3000, 3000]];
-    const margins = [0.4, 0.75, 1.5];
+    const margins = [0.5, 0.75, 1.5];
+    // 24 screens is the ceiling; the index text is widest there.
+    const counts: [number, number][] = [[1, 4], [3, 6], [12, 16], [24, 24]];
     for (const [w, h] of sizes) {
       for (const name of names) {
         for (const marginIn of margins) {
-          await assertNoCollision({
-            pixelWidth: w, pixelHeight: h, dpi: 300, marginIn,
-            inkName: name, jobName: "a-fairly-long-job-name", index: 12, total: 12,
-          });
+          for (const [index, total] of counts) {
+            await assertNoCollision({
+              pixelWidth: w, pixelHeight: h, dpi: 300, marginIn,
+              inkName: name, jobName: "a-fairly-long-job-name",
+              customer: "Nick's Screen Printing", index, total,
+            });
+          }
         }
       }
     }
   });
 
-  it("truncates rather than dropping the screen number", async () => {
+  it("leads with the screen number so a loose film is identifiable", async () => {
     const { PDFDocument, StandardFonts } = await import("pdf-lib");
     const { buildLayout: mkLayout } = await import("@/lib/film/layout");
-    const { computeFilmLabelBox } = await import("@/lib/film/pdf");
+    const { computeSpecBlock, measurerFromFonts } = await import("@/lib/film/pdf");
     const doc = await PDFDocument.create();
     const font = await doc.embedFont(StandardFonts.Helvetica);
     const bold = await doc.embedFont(StandardFonts.HelveticaBold);
     const layout = mkLayout({
-      pixelWidth: 600, pixelHeight: 600, dpi: 300, marginIn: 0.75,
+      pixelWidth: 3000, pixelHeight: 3000, dpi: 300, marginIn: 1,
       includeRegistration: true, includeCenterMarks: true, includeCropMarks: true,
     });
-    const { measurerFromFonts } = await import("@/lib/film/pdf");
-    const box = computeFilmLabelBox(layout, {
-      jobName: "j", index: 3, total: 9,
-      inkName: "A Ridiculously Long Ink Name That Cannot Possibly Fit",
-      inkColor: "#000", mesh: 230, sizeText: "2.00 x 2.00 in", scalePercent: 100, halftone: null,
+    const block = computeSpecBlock(layout, {
+      jobName: "Sailor Tee", customer: "", index: 3, total: 6,
+      inkName: "Navy", inkColor: "#1a2a58", mesh: 230,
+      sizeText: "12.00 x 15.40 in", scalePercent: 100, halftone: "45 LPI / 52.5° / round",
+    }, measurerFromFonts(font, bold))!;
+    const text = block.lines.map((l) => l.text).join(" | ");
+    expect(text).toContain("SEPWIZ");
+    expect(text).toContain("SAILOR TEE");
+    expect(text).toMatch(/03 \/ 06/);
+    expect(text).toContain("NAVY");
+    expect(text).toContain("230 MESH");
+    expect(text).toContain("45 LPI");
+    expect(text).toContain("12.00");
+  });
+
+  it("keeps burn information even when the band is too small for everything", async () => {
+    const { PDFDocument, StandardFonts } = await import("pdf-lib");
+    const { buildLayout: mkLayout } = await import("@/lib/film/layout");
+    const { computeSpecBlock, measurerFromFonts } = await import("@/lib/film/pdf");
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    // A tight margin forces rows to be dropped.
+    const layout = mkLayout({
+      pixelWidth: 1200, pixelHeight: 1200, dpi: 300, marginIn: 0.4,
+      includeRegistration: true, includeCenterMarks: true, includeCropMarks: true,
+    });
+    const block = computeSpecBlock(layout, {
+      jobName: "Sailor Tee", customer: "Nick's Screen Printing", index: 3, total: 6,
+      inkName: "Navy", inkColor: "#1a2a58", mesh: 230,
+      sizeText: "4.00 x 4.00 in", scalePercent: 100, halftone: "45 LPI / 52.5° / round",
     }, measurerFromFonts(font, bold));
-    expect(box?.title).toMatch(/^03/);
+    if (!block) return; // too small to label at all is acceptable
+    const text = block.lines.map((l) => l.text).join(" | ");
+    // Which screen this is, and how to burn it, outrank identification.
+    expect(text).toMatch(/03 \/ 06/);
+    expect(text).toContain("NAVY");
+  });
+
+  it("sits in the top band, not the bottom", async () => {
+    const { PDFDocument, StandardFonts } = await import("pdf-lib");
+    const { buildLayout: mkLayout } = await import("@/lib/film/layout");
+    const { computeSpecBlock, measurerFromFonts } = await import("@/lib/film/pdf");
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    const layout = mkLayout({
+      pixelWidth: 3000, pixelHeight: 3000, dpi: 300, marginIn: 1,
+      includeRegistration: true, includeCenterMarks: true, includeCropMarks: true,
+    });
+    const block = computeSpecBlock(layout, {
+      jobName: "Sailor Tee", customer: "", index: 3, total: 6,
+      inkName: "Navy", inkColor: "#1a2a58", mesh: 230,
+      sizeText: "12.00 x 15.40 in", scalePercent: 100, halftone: null,
+    }, measurerFromFonts(font, bold))!;
+    // Above the artwork, and right-aligned toward the right edge.
+    expect(block.bounds!.y0).toBeGreaterThan(layout.artYPt + layout.artHeightPt);
+    expect(block.rightX).toBeGreaterThan(layout.boardWidthPt * 0.6);
   });
 });
+

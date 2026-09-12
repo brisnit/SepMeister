@@ -239,8 +239,8 @@ describe("session persistence", () => {
   it("re-applies per-ink state onto a fresh separation by id", async () => {
     const { reapplyInkState } = await import("@/lib/store/session");
     const fresh = [
-      { id: "underbase", name: "White Underbase", displayColor: "#ffffff", type: "underbase" as const, order: 0, visible: true, coverage: 0.5, meanDensity: 0.9, mesh: 110, settings: { threshold: 0, gain: 1, choke: 1, spread: 0 }, halftone: { enabled: false, lpi: 45, angle: 22.5, shape: "round" as const }, mask: new Uint8ClampedArray(4) },
-      { id: "ink-0", name: "Cream", displayColor: "#eadfc1", type: "spot" as const, order: 1, visible: true, coverage: 0.3, meanDensity: 0.9, mesh: 156, settings: { threshold: 0, gain: 1, choke: 0, spread: 0 }, halftone: { enabled: true, lpi: 45, angle: 52.5, shape: "round" as const }, mask: new Uint8ClampedArray(4) },
+      { id: "underbase", name: "White Underbase", displayColor: "#ffffff", type: "underbase" as const, order: 0, visible: true, coverage: 0.5, meanDensity: 0.9, mesh: 110, settings: { threshold: 0, gain: 1, choke: 1, spread: 0 }, halftone: { enabled: false, lpi: 45, angle: 22.5, shape: "round" as const }, underbase: "none" as const, underbaseContribution: 0, mask: new Uint8ClampedArray(4) },
+      { id: "ink-0", name: "Cream", displayColor: "#eadfc1", type: "spot" as const, order: 1, visible: true, coverage: 0.3, meanDensity: 0.9, mesh: 156, settings: { threshold: 0, gain: 1, choke: 0, spread: 0 }, halftone: { enabled: true, lpi: 45, angle: 52.5, shape: "round" as const }, underbase: "full" as const, underbaseContribution: 1, mask: new Uint8ClampedArray(4) },
     ];
     const { inks, matched } = reapplyInkState(fresh, session().inks);
     expect(matched).toBe(2);
@@ -256,7 +256,7 @@ describe("session persistence", () => {
   it("leaves unmatched inks on the engine's values", async () => {
     const { reapplyInkState } = await import("@/lib/store/session");
     const fresh = [
-      { id: "ink-9", name: "Navy", displayColor: "#1a2a58", type: "spot" as const, order: 0, visible: true, coverage: 0.2, meanDensity: 0.9, mesh: 156, settings: { threshold: 0, gain: 1, choke: 0, spread: 0 }, halftone: { enabled: false, lpi: 45, angle: 22.5, shape: "round" as const }, mask: new Uint8ClampedArray(4) },
+      { id: "ink-9", name: "Navy", displayColor: "#1a2a58", type: "spot" as const, order: 0, visible: true, coverage: 0.2, meanDensity: 0.9, mesh: 156, settings: { threshold: 0, gain: 1, choke: 0, spread: 0 }, halftone: { enabled: false, lpi: 45, angle: 22.5, shape: "round" as const }, underbase: "none" as const, underbaseContribution: 0, mask: new Uint8ClampedArray(4) },
     ];
     const { inks, matched } = reapplyInkState(fresh, session().inks);
     expect(matched).toBe(0);

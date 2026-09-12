@@ -84,24 +84,27 @@ export function pdfSafe(text: string): string {
 const BLACK = rgb(0, 0, 0);
 const WHITE = rgb(1, 1, 1);
 
-/** Line weight for registration artwork, in points. */
-const MARK_STROKE = 0.5;
-
 function drawRegistrationMarks(page: PDFPage, layout: FilmLayout): void {
+  const stroke = layout.markStroke;
   for (const m of layout.registration) {
     page.drawCircle({
       x: m.cx, y: m.cy, size: m.radius,
-      borderColor: BLACK, borderWidth: MARK_STROKE,
+      borderColor: BLACK, borderWidth: stroke,
     });
-    // Cross arms extend past the circle so the target reads under a loupe.
-    page.drawLine({ start: { x: m.cx - m.armLength, y: m.cy }, end: { x: m.cx + m.armLength, y: m.cy }, thickness: MARK_STROKE, color: BLACK });
-    page.drawLine({ start: { x: m.cx, y: m.cy - m.armLength }, end: { x: m.cx, y: m.cy + m.armLength }, thickness: MARK_STROKE, color: BLACK });
+    // Cross arms run through the centre so the intersection stays an exact
+    // point to align to, and extend past the ring so the target reads at a
+    // glance as well as under a loupe.
+    page.drawLine({ start: { x: m.cx - m.armLength, y: m.cy }, end: { x: m.cx + m.armLength, y: m.cy }, thickness: stroke, color: BLACK });
+    page.drawLine({ start: { x: m.cx, y: m.cy - m.armLength }, end: { x: m.cx, y: m.cy + m.armLength }, thickness: stroke, color: BLACK });
   }
+  // Trim and centre marks stay finer than the targets; they are for cutting
+  // and squaring, not for registering, and a heavy line hides the exact edge.
+  const fine = Math.min(stroke, 0.6);
   for (const c of layout.centerMarks) {
-    page.drawLine({ start: { x: c.x1, y: c.y1 }, end: { x: c.x2, y: c.y2 }, thickness: MARK_STROKE, color: BLACK });
+    page.drawLine({ start: { x: c.x1, y: c.y1 }, end: { x: c.x2, y: c.y2 }, thickness: fine, color: BLACK });
   }
   for (const c of layout.cropMarks) {
-    page.drawLine({ start: { x: c.x1, y: c.y1 }, end: { x: c.x2, y: c.y2 }, thickness: MARK_STROKE, color: BLACK });
+    page.drawLine({ start: { x: c.x1, y: c.y1 }, end: { x: c.x2, y: c.y2 }, thickness: fine, color: BLACK });
   }
 }
 
@@ -133,20 +136,20 @@ export function measurerFromFonts(font: PDFFont, bold: PDFFont): TextMeasurer {
   };
 }
 
-/** Where the film's identifying block sits, and what fits in it. */
-export interface FilmLabelBox {
-  x: number;
-  /** Baseline of the title line. */
-  titleY: number;
-  /** Baseline of the metadata line, or null when there is no room. */
-  metaY: number | null;
-  /** Right edge the text must not cross. */
-  rightBound: number;
-  titleSize: number;
-  metaSize: number;
-  title: string;
-  meta: string;
-  /** Bounding box of everything that will be drawn. */
+/**
+ * The film's production specs, laid out as positioned lines.
+ *
+ * Moved from the bottom band to the top right on shop feedback: that is where
+ * a separator's eye lands when a film comes off the printer, and it keeps the
+ * information beside the target they hang the screen from rather than at the
+ * far end of the sheet.
+ */
+export interface SpecBlock {
+  /** Right edge the lines are aligned to. */
+  rightX: number;
+  /** Left edge the lines must not cross. */
+  leftBound: number;
+  lines: { text: string; y: number; size: number; bold: boolean; width: number }[];
   bounds: { x0: number; y0: number; x1: number; y1: number } | null;
 }
 
@@ -163,107 +166,122 @@ function fitText(text: string, measure: TextMeasurer, size: number, bold: boolea
 }
 
 /**
- * Computes the film's identifying block: position, sizes and fitted strings.
+ * Builds the top-right specification block.
  *
- * Separated from drawing so the geometry can be asserted directly. The block
- * shares the bottom margin band with registration targets, and text printed
- * across a target destroys it -- on a small artboard a long ink name will reach
- * the bottom-center mark, which silently breaks registration on some films of a
- * job but not others. Both the title and the metadata are therefore fitted to
- * the space between the marks, not just the metadata.
+ * Bounded by the registration targets actually present in the top band rather
+ * than by an assumed layout: a spec line printed across a target destroys it,
+ * and because ink names differ in length it would destroy that target on some
+ * films of a job but not others -- leaving the set disagreeing on exactly the
+ * marks used to align them.
  */
-export function computeFilmLabelBox(
+export function computeSpecBlock(
   layout: FilmLayout,
   label: FilmLabel,
   measure: TextMeasurer,
-): FilmLabelBox | null {
-  // Find the registration targets that share this band and their clearances.
-  const inBand = layout.registration.filter((m) => m.cy < layout.artYPt);
-  const clearanceOf = (m: { radius: number; armLength: number }) => Math.max(m.radius, m.armLength) + 6;
+): SpecBlock | null {
+  const bandBottom = layout.artYPt + layout.artHeightPt;
+  const bandTop = layout.boardHeightPt;
+  const bandHeight = bandTop - bandBottom;
+  if (bandHeight < 18) return null;
 
-  let x = layout.marginPt * 0.25;
+  const inBand = layout.registration.filter((m) => m.cy > bandBottom);
+  // Generous clearance: text that merely *touches* a target still makes the
+  // operator second-guess whether the mark is clean.
+  const clearance = (m: { radius: number; armLength: number }) => Math.max(m.radius, m.armLength) + 14;
+
+  // Right edge: inside the sheet, clear of any target near the right corner.
+  let rightX = layout.boardWidthPt - layout.marginPt * 0.22;
   for (const m of inBand) {
-    const right = m.cx + clearanceOf(m);
-    if (m.cx <= layout.boardWidthPt * 0.25 && right > x) x = right;
+    if (m.cx > layout.boardWidthPt * 0.75) {
+      rightX = Math.min(rightX, m.cx - clearance(m));
+    }
   }
 
-  let rightBound = layout.boardWidthPt - layout.marginPt * 0.25;
+  // Left bound: stop before the nearest target to the left of the block.
+  let leftBound = layout.marginPt * 0.22;
   for (const m of inBand) {
-    const left = m.cx - clearanceOf(m);
-    if (left > x && left < rightBound) rightBound = left;
+    const right = m.cx + clearance(m);
+    if (m.cx < rightX && right > leftBound) leftBound = right;
   }
 
-  const available = rightBound - x;
-  if (available <= 40) return null; // board too small to label legibly
+  const available = rightX - leftBound;
+  if (available < 60) return null;
 
-  const titleSize = Math.max(6, Math.min(11, layout.marginPt * 0.2));
-  const metaSize = Math.max(5, titleSize * 0.68);
-  const bandBottom = 4;
+  const titleSize = Math.max(5.5, Math.min(8.5, bandHeight * 0.155));
+  const bodySize = titleSize * 0.9;
+  const leading = bodySize * 1.32;
 
-  let titleY = layout.artYPt - 6 - titleSize;
-  const blockHeight = titleSize + metaSize + 4;
-  if (titleY - metaSize - 4 < bandBottom) titleY = bandBottom + blockHeight - titleSize;
-  if (titleY < bandBottom) return null;
-
-  const title = fitText(formatFilmTitle(label), measure, titleSize, true, available);
-
-  // Ordered by how much a press operator needs them if space runs short.
-  // Ordered by how much a press operator needs them if space runs short.
-  const fields = [
-    `Ink: ${label.inkName}`,
-    `Mesh: ${label.mesh}`,
-    label.halftone ?? "Solid",
-    `Screen ${label.index}/${label.total}`,
-    `Job: ${label.jobName}`,
-    ...(label.customer ? [label.customer] : []),
-    `${label.sizeText} @ ${label.scalePercent}%`,
+  /**
+   * Rows carry a drop order separate from their display order.
+   *
+   * The band is a single margin tall, so on a small artboard something has to
+   * go. What must survive is which screen this is and how to burn it -- a film
+   * with no mesh or line count on it sends the operator back to the paperwork,
+   * which is the handoff this block exists to remove. The job name and
+   * customer are identification, and identification is what gets dropped.
+   */
+  const rows: { text: string; bold: boolean; size: number; drop: number }[] = [
+    { text: `SEPWIZ  ${label.jobName.toUpperCase()}`, bold: true, size: titleSize, drop: 3 },
+    ...(label.customer ? [{ text: label.customer, bold: false, size: bodySize, drop: 4 }] : []),
+    {
+      text: `${String(label.index).padStart(2, "0")} / ${String(label.total).padStart(2, "0")}   ${label.inkName.toUpperCase()}`,
+      bold: true, size: titleSize, drop: 0,
+    },
+    {
+      text: `${label.mesh} MESH   ${label.halftone ? label.halftone.toUpperCase() : "SOLID"}`,
+      bold: false, size: bodySize, drop: 1,
+    },
+    { text: `${label.sizeText.toUpperCase()}   ${label.scalePercent}%`, bold: false, size: bodySize, drop: 2 },
   ];
-  let meta = "";
-  for (const f of fields) {
-    const candidate = meta ? `${meta}    ${f}` : f;
-    if (measure.width(candidate, metaSize, false) > available) break;
-    meta = candidate;
+
+  const stepOf = (r: { size: number }) => Math.max(r.size * 1.32, leading);
+  const stackHeight = (list: typeof rows) => list.reduce((h, r) => h + stepOf(r), 0);
+
+  let visible = rows;
+  while (visible.length > 1 && stackHeight(visible) > bandHeight - 6) {
+    // Remove whichever remaining row is least essential, keeping display order.
+    const worst = visible.reduce((a, b) => (b.drop > a.drop ? b : a));
+    visible = visible.filter((r) => r !== worst);
+  }
+  if (stackHeight(visible) > bandHeight - 4) return null;
+
+  const totalHeight = stackHeight(visible);
+  let cursor = bandTop - (bandHeight - totalHeight) / 2;
+
+  const lines: SpecBlock["lines"] = [];
+  for (const row of visible) {
+    const text = fitText(row.text, measure, row.size, row.bold, available);
+    if (!text) continue;
+    const step = stepOf(row);
+    cursor -= step;
+    lines.push({ text, y: cursor + step * 0.22, size: row.size, bold: row.bold, width: measure.width(text, row.size, row.bold) });
   }
 
-  const metaY = titleY - metaSize - 3;
-  const showMeta = meta !== "" && metaY >= bandBottom;
+  if (lines.length === 0) return null;
 
-  const widest = Math.max(
-    title ? measure.width(title, titleSize, true) : 0,
-    showMeta ? measure.width(meta, metaSize, false) : 0,
-  );
-
-  const bounds = title || showMeta
-    ? {
-        x0: x,
-        y0: showMeta ? metaY : titleY,
-        x1: x + widest,
-        y1: titleY + titleSize,
-      }
-    : null;
-
-  return {
-    x,
-    titleY,
-    metaY: showMeta ? metaY : null,
-    rightBound,
-    titleSize,
-    metaSize,
-    title,
-    meta: showMeta ? meta : "",
-    bounds,
+  const widest = Math.max(...lines.map((l) => l.width));
+  const bounds = {
+    x0: rightX - widest,
+    y0: lines[lines.length - 1].y,
+    x1: rightX,
+    y1: lines[0].y + lines[0].size,
   };
+
+  return { rightX, leftBound, lines, bounds };
 }
 
-function drawFilmLabel(page: PDFPage, layout: FilmLayout, label: FilmLabel, font: PDFFont, bold: PDFFont): void {
-  const box = computeFilmLabelBox(layout, label, measurerFromFonts(font, bold));
-  if (!box) return;
-
-  if (box.title) {
-    page.drawText(pdfSafe(box.title), { x: box.x, y: box.titleY, size: box.titleSize, font: bold, color: BLACK });
-  }
-  if (box.meta && box.metaY !== null) {
-    page.drawText(pdfSafe(box.meta), { x: box.x, y: box.metaY, size: box.metaSize, font, color: BLACK });
+function drawSpecBlock(page: PDFPage, layout: FilmLayout, label: FilmLabel, font: PDFFont, bold: PDFFont): void {
+  const block = computeSpecBlock(layout, label, measurerFromFonts(font, bold));
+  if (!block) return;
+  for (const line of block.lines) {
+    page.drawText(pdfSafe(line.text), {
+      // Right-aligned so the block squares up against the sheet edge.
+      x: block.rightX - line.width,
+      y: line.y,
+      size: line.size,
+      font: line.bold ? bold : font,
+      color: BLACK,
+    });
   }
 }
 
@@ -315,7 +333,7 @@ export async function buildFilmPdf(input: FilmPdfInput): Promise<Uint8Array> {
   });
 
   drawRegistrationMarks(page, layout);
-  drawFilmLabel(page, layout, input.label, font, bold);
+  drawSpecBlock(page, layout, input.label, font, bold);
 
   return doc.save();
 }

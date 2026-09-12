@@ -87,10 +87,12 @@ export function ExportPanel({
  * the main action must never be something you have to scroll to find.
  */
 export function ExportAction({
-  onReview, busy, busyLabel, warningCount,
+  onReview, onSpotPdf, busy, spotBusy, busyLabel, warningCount,
 }: {
   onReview: () => void;
+  onSpotPdf: () => void;
   busy: boolean;
+  spotBusy: boolean;
   busyLabel: string;
   warningCount: number;
 }) {
@@ -102,14 +104,24 @@ export function ExportAction({
           <p className="mt-2 text-[12px] font-medium text-ink-600">{busyLabel}</p>
         </div>
       ) : (
-        <Button variant="primary" size="lg" onClick={onReview} className="w-full">
-          REVIEW &amp; DOWNLOAD FILMS
-        </Button>
+        <>
+          <Button variant="primary" size="lg" onClick={onReview} className="w-full">
+            REVIEW &amp; DOWNLOAD FILMS
+          </Button>
+          <Button size="md" onClick={onSpotPdf} disabled={spotBusy} className="mt-1.5 w-full">
+            {spotBusy ? "Building spot PDF…" : "DOWNLOAD SPOT PDF"}
+          </Button>
+        </>
       )}
       <p className="mt-2 text-[10px] leading-snug text-ink-400">
         {warningCount > 0
-          ? `${warningCount} production warning${warningCount === 1 ? "" : "s"} to review before output.`
-          : "Output check runs film QA before anything downloads."}
+          ? `${warningCount} production warning${warningCount === 1 ? "" : "s"} to review before output. `
+          : "Output check runs film QA before anything downloads. "}
+        <span className="block pt-1">
+          <strong className="text-ink-500">Films</strong> are black-on-white positives, one per screen, for
+          printing to transparency. <strong className="text-ink-500">Spot PDF</strong> is one page of named
+          separation plates, for a RIP.
+        </span>
       </p>
     </div>
   );

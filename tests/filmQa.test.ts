@@ -120,7 +120,8 @@ describe("film QA", () => {
     const report = await qa();
     const c = find(report, "registration");
     expect(c.status).toBe("pass");
-    expect(c.detail).toContain("8 targets");
+    // T-shape: three across the top plus one at bottom centre.
+    expect(c.detail).toContain("4 targets");
   });
 
   it("warns when registration marks are switched off", async () => {

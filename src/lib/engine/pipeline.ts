@@ -25,6 +25,7 @@ import { meanDeltaE, ssim, similarityPercent } from "./metrics";
 import { scoreSeparation } from "./qa";
 import {
   MAX_SCREENS,
+  type UnderbaseRelationship,
   type HalftoneSettings, type InkHalftone, type InkSeparation, type MergeRecord,
   type ProductionSettings, type ProgressEvent, type SeparationPlan, type QAResult,
 } from "@/lib/types";
@@ -124,6 +125,25 @@ function halftoneFor(
     angle: angleFromPreset(DEFAULT_ANGLE_PRESET, index),
     shape: defaults.shape,
   };
+}
+
+/**
+ * Default underbase relationship for a newly separated ink.
+ *
+ * Black is the one clear case: it covers a dark garment unaided, and white
+ * beneath it only dulls it and adds a registration dependency. Everything else
+ * starts at full and is the separator's call from there.
+ */
+function defaultUnderbaseFor(type: InkSeparation["type"]): UnderbaseRelationship {
+  if (type === "black") return "none";
+  return "full";
+}
+
+/** Contribution implied by a relationship, before any manual override. */
+export function contributionFor(relationship: UnderbaseRelationship): number {
+  if (relationship === "none") return 0;
+  if (relationship === "reduced") return 0.5;
+  return 1;
 }
 
 /** Mesh recommendation from ink role and artwork detail. */
@@ -438,7 +458,10 @@ export function runSeparation(input: SeparationInput): SeparationOutput {
     underbaseMask = buildUnderbase({
       width,
       height,
-      topMasks: drafts.map((d) => d.mask),
+      sources: drafts.map((d) => ({
+        mask: d.mask,
+        contribution: contributionFor(defaultUnderbaseFor(d.type)),
+      })),
       blackMask: blackDraft ? blackDraft.mask : null,
       options: { ...ubOpts, chokePx: scaledChoke, featherPx: resolveChokePixels(ubOpts.featherPx, dpi) },
     });
@@ -473,6 +496,9 @@ export function runSeparation(input: SeparationInput): SeparationOutput {
       mesh: meshFor("underbase", settings.meshCount, analysis),
       settings: { threshold: 0, gain: 1, choke: ubOpts.chokePx, spread: 0 },
       halftone: halftoneFor("underbase", 0, halftoneDefaults),
+      // The base does not sit on itself.
+      underbase: "none",
+      underbaseContribution: 0,
       mask: underbaseMask.data,
       note:
         `Choked ${ubOpts.chokePx}px` +
@@ -495,6 +521,8 @@ export function runSeparation(input: SeparationInput): SeparationOutput {
       mesh: meshFor(d.type, settings.meshCount, analysis),
       settings: { threshold: 0, gain: 1, choke: 0, spread: 0 },
       halftone: halftoneFor(d.type, i + 1, halftoneDefaults),
+      underbase: defaultUnderbaseFor(d.type),
+      underbaseContribution: contributionFor(defaultUnderbaseFor(d.type)),
       mask: d.mask.data,
       note: d.note,
     });
@@ -645,4 +673,57 @@ export function applyInkSettings(
   if (choke > 0) m = erode(m, choke);
   if (spread > 0) m = dilate(m, spread);
   return m.data;
+}
+
+/**
+ * Rebuilds only the underbase from the current inks and their relationships.
+ *
+ * Separate from `runSeparation` because changing "no white under the navy" is
+ * an underbase decision, not a colour-separation one -- re-clustering the
+ * artwork to answer it would risk changing the inks themselves, which is
+ * exactly what a separator adjusting the base does not want.
+ */
+export function rebuildUnderbase(input: {
+  inks: InkSeparation[];
+  width: number;
+  height: number;
+  dpi: number;
+  options: Partial<UnderbaseOptions>;
+}): { mask: Uint8ClampedArray; coverage: number; meanDensity: number; note: string } {
+  const { inks, width, height, dpi } = input;
+  const opts: UnderbaseOptions = { ...DEFAULT_UNDERBASE, ...input.options };
+
+  const tops = inks.filter((i) => i.type !== "underbase");
+  const black = tops.find((i) => i.type === "black");
+
+  const built = buildUnderbase({
+    width,
+    height,
+    sources: tops.map((ink) => ({
+      mask: { width, height, data: ink.mask },
+      contribution: ink.underbaseContribution,
+    })),
+    blackMask: black ? { width, height, data: black.mask } : null,
+    options: {
+      ...opts,
+      chokePx: resolveChokePixels(opts.chokePx, dpi),
+      featherPx: resolveChokePixels(opts.featherPx, dpi),
+    },
+  });
+
+  const stats = maskStats(built);
+  const excluded = tops.filter((i) => i.underbaseContribution <= 0);
+  const reduced = tops.filter((i) => i.underbaseContribution > 0 && i.underbaseContribution < 1);
+
+  const parts = [`Choked ${opts.chokePx}px`];
+  if (opts.removeUnderBlack) parts.push("pulled out from under black");
+  if (excluded.length) parts.push(`no base under ${excluded.map((i) => i.name).join(", ")}`);
+  if (reduced.length) parts.push(`reduced under ${reduced.map((i) => i.name).join(", ")}`);
+
+  return {
+    mask: built.data,
+    coverage: stats.coverage,
+    meanDensity: stats.meanDensity,
+    note: `${parts.join(", ")}.`,
+  };
 }

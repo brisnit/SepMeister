@@ -72,6 +72,15 @@ export interface InkHalftone {
   shape: DotShape;
 }
 
+/**
+ * How much white this ink asks for beneath it.
+ *
+ * A separator's judgement, not a physical property. Navy over a black shirt
+ * often needs no base at all; a yellow always does. "Reduced" is for inks that
+ * want some opacity without a full hit of white deadening the colour.
+ */
+export type UnderbaseRelationship = "full" | "reduced" | "none";
+
 export interface InkSeparation {
   id: string;
   name: string;
@@ -87,6 +96,16 @@ export interface InkSeparation {
   mesh: number;
   settings: MaskSettings;
   halftone: InkHalftone;
+  /** Whether this ink asks for white beneath it. */
+  underbase: UnderbaseRelationship;
+  /**
+   * Share of this ink's coverage that feeds underbase generation, 0..1.
+   *
+   * Explicitly NOT physical ink opacity -- it is how much this screen
+   * contributes to the base mask. "Reduced" seeds it below 1; the artist can
+   * set any value.
+   */
+  underbaseContribution: number;
   /** Grayscale coverage, 0=no ink 255=full. length = width*height. */
   mask: Uint8ClampedArray;
   /** Human-readable note about how this ink was derived. */
@@ -272,6 +291,41 @@ export interface AccountState {
   firstSeenAt: string;
 }
 
+/**
+ * A film printer's capabilities.
+ *
+ * Deliberately unpopulated. Listing printers we have not physically printed a
+ * usable film from would be claiming support we have not earned — and a shop
+ * that trusts such a list and wastes a box of transparency has good reason
+ * never to trust the tool again.
+ */
+export interface PrinterProfile {
+  id: string;
+  manufacturer: string;
+  model: string;
+  /** Addressable resolution in DPI. */
+  resolution: number | null;
+  maxMediaWidthIn: number | null;
+  supportedMedia: string[];
+  /** How output reaches the device. None implemented. */
+  outputProtocol: "unknown" | "driver" | "raw-socket" | "hot-folder";
+  /** Free text until we model this properly. */
+  densitySettings: string;
+  /** True only once a film from this device has been physically verified. */
+  validated: boolean;
+}
+
+/** Nick's actual output chain, captured rather than assumed. */
+export interface ShopOutputSetup {
+  printerManufacturer: string;
+  printerModel: string;
+  rip: string;
+  outputResolution: string;
+  media: string;
+  densitySettings: string;
+  otherRipSettings: string;
+}
+
 export type FeedbackOutcome = "excellent" | "good" | "needs-adjustment" | "failed";
 
 /** Would a separator commit film and emulsion to this? The headline question. */
@@ -321,6 +375,8 @@ export interface FeedbackRecord {
     normalTimeNote: string;
     wouldPay: WouldPay | null;
   };
+  /** The shop's output chain, so a press result can be interpreted later. */
+  outputSetup?: ShopOutputSetup;
   /** Snapshot of the settings that produced the films. */
   snapshot: {
     screens: number;

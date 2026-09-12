@@ -110,3 +110,22 @@ export function buildUnderbaseOverlay(
   }
   return out;
 }
+
+/**
+ * Renders a coverage mask as greyscale: white is full ink, black is none.
+ *
+ * The exact inverse of the film positive, which is why the two are always
+ * labelled explicitly wherever either is shown — confusing them means burning
+ * a screen backwards.
+ */
+export function maskToGrayRgba(mask: Uint8ClampedArray): Uint8ClampedArray {
+  const out = new Uint8ClampedArray(mask.length * 4);
+  for (let i = 0; i < mask.length; i++) {
+    const v = mask[i];
+    out[i * 4] = v;
+    out[i * 4 + 1] = v;
+    out[i * 4 + 2] = v;
+    out[i * 4 + 3] = 255;
+  }
+  return out;
+}

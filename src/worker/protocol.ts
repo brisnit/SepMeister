@@ -104,6 +104,28 @@ export type WorkerRequest =
       underbaseSettings?: { choke: number; strength: number; removeUnderBlack: boolean; highlightWhite: boolean } | null;
     }
   | {
+      /** Recomputes only the base from the inks' current relationships. */
+      type: "rebuildUnderbase";
+      requestId: number;
+      inks: (Omit<InkSeparation, "mask"> & { mask: ArrayBuffer })[];
+      width: number;
+      height: number;
+      dpi: number;
+      options: { chokePx: number; strength: number; removeUnderBlack: boolean };
+    }
+  | {
+      type: "spotPdf";
+      requestId: number;
+      plan: TransferPlan;
+      masks: ArrayBuffer[];
+      metadata: JobMetadata;
+      productionSize: ProductionSize;
+      exportSettings: ExportSettings;
+      width: number;
+      height: number;
+      applyHalftones: boolean;
+    }
+  | {
       /** Runs the pre-export checks without producing an archive. */
       type: "filmQa";
       requestId: number;
@@ -149,6 +171,15 @@ export type WorkerResponse =
       capped: boolean;
       applied: boolean;
     }
+  | {
+      type: "underbaseRebuilt";
+      requestId: number;
+      mask: ArrayBuffer;
+      coverage: number;
+      meanDensity: number;
+      note: string;
+    }
+  | { type: "spotPdfBuilt"; requestId: number; bytes: ArrayBuffer; fileName: string; plateNames: string[] }
   | { type: "composited"; requestId: number; rgba: ArrayBuffer }
   | { type: "inkAdjusted"; requestId: number; inkId: string; mask: ArrayBuffer }
   | { type: "filmPreviewed"; requestId: number; rgba: ArrayBuffer }

@@ -51,24 +51,46 @@ export function resolveChokePixels(requestedPx: number, workingDpi: number): num
   return Math.max(0, requestedPx * scale);
 }
 
+/** One ink's demand on the base. */
+export interface UnderbaseSource {
+  mask: Mask;
+  /**
+   * Share of this ink's coverage that feeds the base, 0..1. Zero means the
+   * artist has said not to put white under this colour at all.
+   */
+  contribution: number;
+}
+
 export interface BuildUnderbaseInput {
   width: number;
   height: number;
-  /** Coverage masks for every ink that will print on top of the base. */
-  topMasks: Mask[];
+  /**
+   * Every ink that will print on top of the base, with how much each asks for.
+   *
+   * Per-ink rather than a flat union because the decision is per-ink in
+   * practice: a navy over a black shirt often wants no white beneath it at
+   * all, while the yellow beside it needs a full hit. Taking the union would
+   * put white under both.
+   */
+  sources: UnderbaseSource[];
   /** Mask of area the black screen will cover, if one exists. */
   blackMask?: Mask | null;
   options: UnderbaseOptions;
 }
 
 export function buildUnderbase(input: BuildUnderbaseInput): Mask {
-  const { width, height, topMasks, blackMask, options } = input;
+  const { width, height, sources, blackMask, options } = input;
 
-  // 1. Everywhere any ink prints, the garment must be blocked.
+  // 1. Everywhere an ink asks for a base, the garment must be blocked --
+  //    scaled by how much that ink asked for. An ink set to "none"
+  //    contributes nothing, so white simply is not laid under it.
   let base = createMask(width, height);
-  for (const m of topMasks) {
+  for (const src of sources) {
+    if (src.contribution <= 0) continue;
+    const scale = Math.min(1, src.contribution);
     for (let i = 0; i < base.data.length; i++) {
-      if (m.data[i] > base.data[i]) base.data[i] = m.data[i];
+      const want = src.mask.data[i] * scale;
+      if (want > base.data[i]) base.data[i] = want;
     }
   }
 

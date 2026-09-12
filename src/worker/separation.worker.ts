@@ -7,7 +7,10 @@
  * thread would freeze scrolling, the progress display and every control.
  */
 
-import { runSeparation, applyInkSettings } from "@/lib/engine/pipeline";
+import { runSeparation, applyInkSettings, rebuildUnderbase } from "@/lib/engine/pipeline";
+import { buildSpotPdf } from "@/lib/spot/spotPdf";
+import { toSpotColors } from "@/lib/spot/spotColor";
+import { slugify } from "@/lib/engine/naming";
 import { planUpscale, applyUpscale } from "@/lib/engine/upscale";
 import { decodeInBrowser } from "@/lib/engine/browserDecode";
 import { downscaleToWorking, resolveDpi, UploadError } from "@/lib/engine/decode";
@@ -201,6 +204,59 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
             fileName: bundle.fileName, films: bundle.films, qaReport: bundle.qaReport,
           },
           [buf(bundle.zip)],
+        );
+        break;
+      }
+
+      case "rebuildUnderbase": {
+        const inks = req.inks.map((ink) => ({ ...ink, mask: new Uint8ClampedArray(ink.mask) }));
+        const out = rebuildUnderbase({
+          inks, width: req.width, height: req.height, dpi: req.dpi, options: req.options,
+        });
+        post(
+          {
+            type: "underbaseRebuilt", requestId: req.requestId, mask: buf(out.mask),
+            coverage: out.coverage, meanDensity: out.meanDensity, note: out.note,
+          },
+          [buf(out.mask)],
+        );
+        break;
+      }
+
+      case "spotPdf": {
+        const inks = req.plan.inks.map((ink, i) => ({ ...ink, mask: new Uint8ClampedArray(req.masks[i]) }));
+        const artDpi = effectiveDpi(req.width, req.productionSize);
+        const layout = buildLayout({
+          pixelWidth: req.width, pixelHeight: req.height, dpi: artDpi,
+          marginIn: req.exportSettings.marginIn,
+          includeRegistration: req.exportSettings.includeRegistration,
+          includeCenterMarks: req.exportSettings.includeCenterMarks,
+          includeCropMarks: req.exportSettings.includeCropMarks,
+        });
+        const raster = planFilmRaster(
+          req.productionSize.widthIn, req.productionSize.heightIn,
+          req.exportSettings.filmDpi, req.width, req.height,
+        );
+        const built = await buildSpotPdf({
+          spots: toSpotColors(inks),
+          layout,
+          jobName: req.metadata.jobName || "untitled-job",
+          customer: req.metadata.customer,
+          width: req.width,
+          height: req.height,
+          rasterWidth: raster.width,
+          rasterHeight: raster.height,
+          rasterDpi: raster.dpi,
+          applyHalftones: req.applyHalftones,
+          includeMarks: true,
+        });
+        post(
+          {
+            type: "spotPdfBuilt", requestId: req.requestId, bytes: buf(built.bytes),
+            fileName: `${slugify(req.metadata.jobName || "untitled-job")}-spot.pdf`,
+            plateNames: built.plateNames,
+          },
+          [buf(built.bytes)],
         );
         break;
       }

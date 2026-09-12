@@ -3,11 +3,15 @@
 import { useMemo } from "react";
 import type {
   ExportSettings, ImageAnalysis, InkSeparation, JobMetadata, PressPreset,
-  ProductionSettings, ProductionSize, QAResult, SeparationPlan,
+  ProductionSettings, ProductionSize, QAResult, SeparationPlan, UnderbaseRelationship,
 } from "@/lib/types";
+import type { InspectionResult } from "@/lib/spot/inspect";
 import type { OperationResult } from "@/lib/ai/operations";
 import { effectiveDpi } from "@/lib/production/size";
-import { CanvasView, maskToFilmRgba, maskToInkRgba, buildUnderbaseOverlay } from "./CanvasView";
+import { CanvasView, maskToFilmRgba, maskToInkRgba, maskToGrayRgba, buildUnderbaseOverlay } from "./CanvasView";
+import { InspectionCanvas, type LoupePower } from "./InspectionCanvas";
+import { CoverageReadout } from "./CoverageReadout";
+import { SpotChannels, UnderbaseActions, type ChannelRender } from "./SpotChannels";
 import { SeparationStack } from "./SeparationStack";
 import { ScreenSummary } from "./ScreenSummary";
 import { SepScorePanel } from "./SepScorePanel";
@@ -39,6 +43,13 @@ export interface WorkspaceProps {
   demoMode: boolean;
   demoStep: DemoStep;
   sepScore: number;
+  inspection: InspectionResult | null;
+  loupeOn: boolean;
+  loupePower: LoupePower;
+  channelRender: ChannelRender;
+  soloInk: string | null;
+  underbaseBusy: boolean;
+  spotBusy: boolean;
   view: ViewMode;
   underbaseView: UnderbaseView;
   selectedInk: string | null;
@@ -59,6 +70,15 @@ export interface WorkspaceProps {
   onMetadata: (next: JobMetadata) => void;
   onDemoMode: (on: boolean) => void;
   onDemoStep: (s: DemoStep) => void;
+  onHoverPoint: (p: { x: number; y: number } | null) => void;
+  onLoupe: (on: boolean) => void;
+  onLoupePower: (p: LoupePower) => void;
+  onChannelRender: (r: ChannelRender) => void;
+  onSolo: (id: string | null) => void;
+  onUnderbaseRelationship: (id: string, rel: UnderbaseRelationship) => void;
+  onRemoveUnderbase: () => void;
+  onRegenerateUnderbase: () => void;
+  onSpotPdf: () => void;
   onView: (v: ViewMode) => void;
   onUnderbaseView: (v: UnderbaseView) => void;
   onSelectInk: (id: string | null) => void;
@@ -93,6 +113,9 @@ export function Workspace(props: WorkspaceProps) {
   } = props;
 
   const selected = selectedInk ? plan.inks.find((i) => i.id === selectedInk) ?? null : null;
+  const solo = props.soloInk ? plan.inks.find((i) => i.id === props.soloInk) ?? null : null;
+  /** Solo wins over selection: it is the more deliberate act. */
+  const focused = solo ?? selected;
   const base = plan.inks.find((i) => i.type === "underbase") ?? null;
   const artDpi = effectiveDpi(width, productionSize);
 
@@ -103,7 +126,7 @@ export function Workspace(props: WorkspaceProps) {
     if (base && underbaseView !== "off") {
       const mask = base.mask;
       if (underbaseView === "film") {
-        return { rgba: maskToFilmRgba(mask), checkered: false, label: "Underbase — film positive" };
+        return { rgba: maskToFilmRgba(mask), checkered: false, label: "Underbase — film positive (black blocks exposure)" };
       }
       if (underbaseView === "overlay" && originalRgba) {
         return {
@@ -123,19 +146,27 @@ export function Workspace(props: WorkspaceProps) {
       return { rgba: originalRgba, checkered: true, label: "Original artwork" };
     }
     if (view === "films") {
-      if (selected) return { rgba: maskToFilmRgba(selected.mask), checkered: false, label: `${selected.name} film positive` };
+      if (focused) return { rgba: maskToFilmRgba(focused.mask), checkered: false, label: `${focused.name} — film positive (black blocks exposure)` };
       return { rgba: null, checkered: false, label: "Film positives" };
     }
-    if (selected) {
+    if (focused) {
+      // The channel render mode decides how an isolated plate is shown, so
+      // mask and film can never be mistaken for one another.
+      if (props.channelRender === "mask") {
+        return { rgba: maskToGrayRgba(focused.mask), checkered: false, label: `${focused.name} — mask (white = 100% ink)` };
+      }
+      if (props.channelRender === "film") {
+        return { rgba: maskToFilmRgba(focused.mask), checkered: false, label: `${focused.name} — film positive (black blocks exposure)` };
+      }
       const ground = view === "garment" ? plan.garmentColor : "#ffffff";
       return {
-        rgba: maskToInkRgba(selected.mask, selected.displayColor, ground),
+        rgba: maskToInkRgba(focused.mask, focused.displayColor, ground),
         checkered: false,
-        label: `${selected.name} separation`,
+        label: `${focused.name} — ink preview`,
       };
     }
     return { rgba: compositeRgba, checkered: false, label: "Separated composite" };
-  }, [view, underbaseView, base, selected, originalRgba, compositeRgba, plan.garmentColor, width, height]);
+  }, [view, underbaseView, base, focused, originalRgba, compositeRgba, plan.garmentColor, width, height, props.channelRender]);
 
   return (
     <div className="flex h-screen flex-col bg-surface-sunken">
@@ -292,26 +323,55 @@ export function Workspace(props: WorkspaceProps) {
 
         {/* CENTER — the artwork */}
         <main className="relative flex min-h-0 flex-col">
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
-            {view === "films" && !selected && underbaseView === "off" ? (
+          {view === "films" && !focused && underbaseView === "off" ? (
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto p-6">
               <FilmContactSheet inks={plan.inks} width={width} height={height} onSelect={props.onSelectInk} />
-            ) : (
-              <CanvasView
-                rgba={canvas.rgba}
-                width={width}
-                height={height}
-                checkered={canvas.checkered}
-                alt={canvas.label}
-                className="shadow-sm"
-              />
-            )}
-          </div>
+            </div>
+          ) : (
+            <InspectionCanvas
+              rgba={canvas.rgba}
+              width={width}
+              height={height}
+              checkered={canvas.checkered}
+              alt={canvas.label}
+              loupe={props.loupeOn}
+              loupePower={props.loupePower}
+              onHover={props.onHoverPoint}
+            />
+          )}
 
           <div className="flex shrink-0 items-center gap-3 border-t border-ink-100 bg-surface px-4 py-2">
             <span className="text-[12px] font-medium text-ink-700">{canvas.label}</span>
-            {selected ? (
-              <Button size="sm" variant="ghost" onClick={() => props.onSelectInk(null)}>Show all</Button>
+            {focused ? (
+              <Button size="sm" variant="ghost" onClick={() => { props.onSelectInk(null); props.onSolo(null); }}>
+                Show all
+              </Button>
             ) : null}
+
+            <span className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-pressed={props.loupeOn}
+                onClick={() => props.onLoupe(!props.loupeOn)}
+                className={`ctl h-7 rounded px-2.5 text-[12px] font-medium ${props.loupeOn ? "ctl-active" : ""}`}
+                title="Magnify under the cursor without changing the canvas zoom"
+              >
+                Loupe
+              </button>
+              {props.loupeOn
+                ? ([4, 8, 16] as LoupePower[]).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      aria-pressed={props.loupePower === p}
+                      onClick={() => props.onLoupePower(p)}
+                      className={`ctl h-7 rounded px-1.5 text-[11px] font-medium ${props.loupePower === p ? "ctl-active" : ""}`}
+                    >
+                      {p}×
+                    </button>
+                  ))
+                : null}
+            </span>
             {view === "films" && underbaseView === "off" ? <Pill>Black artwork = ink coverage</Pill> : null}
             {busy ? (
               <span className="ml-auto flex items-center gap-2 text-[12px] text-ink-500">
@@ -328,6 +388,28 @@ export function Workspace(props: WorkspaceProps) {
         <aside className="flex min-h-0 flex-col border-l border-ink-100 bg-surface">
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             <ScreenSummary plan={plan} onSelect={props.onSelectInk} selectedId={selectedInk} />
+            <UnderbaseActions
+              base={base}
+              busy={props.underbaseBusy}
+              onRemove={props.onRemoveUnderbase}
+              onRegenerate={props.onRegenerateUnderbase}
+            />
+            <SpotChannels
+              plan={plan}
+              render={props.channelRender}
+              soloId={props.soloInk}
+              selectedId={selectedInk}
+              underbaseBusy={props.underbaseBusy}
+              onRender={props.onChannelRender}
+              onSolo={props.onSolo}
+              onSelect={props.onSelectInk}
+              onToggle={props.onToggleInk}
+              onUnderbaseRelationship={props.onUnderbaseRelationship}
+              onReorder={props.onReorderInk}
+            />
+            <div className="border-b border-ink-100">
+              <CoverageReadout result={props.inspection} />
+            </div>
             <SeparationStack
               inks={plan.inks}
               selectedId={selectedInk}
@@ -357,7 +439,9 @@ export function Workspace(props: WorkspaceProps) {
           {/* Pinned: the primary action stays visible however far the panel scrolls. */}
           <ExportAction
             onReview={props.onOpenOutputCheck}
+            onSpotPdf={props.onSpotPdf}
             busy={exportBusy}
+            spotBusy={props.spotBusy}
             busyLabel={exportLabel}
             warningCount={productionWarnings.length}
           />
