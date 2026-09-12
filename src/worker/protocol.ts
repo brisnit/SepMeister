@@ -8,8 +8,9 @@
  */
 
 import type {
-  DotShape, ExportSettings, FilmQAReport, HalftoneSettings, ImageAnalysis, InkSeparation,
-  JobMetadata, ProductionSettings, ProductionSize, QAResult, SeparationPlan,
+  DotShape, EmeraldExpectations, ExportSettings, FilmQAReport, HalftoneSettings, ImageAnalysis,
+  InkSeparation, JobMetadata, ProductionSettings, ProductionSize, QAResult, ScreeningMode,
+  SeparationPlan,
 } from "@/lib/types";
 import type { HalftoneParams } from "@/lib/engine/halftone";
 import type { UnderbaseOptions } from "@/lib/engine/underbase";
@@ -124,6 +125,25 @@ export type WorkerRequest =
       width: number;
       height: number;
       applyHalftones: boolean;
+      /** Recorded on the result so the file name states which mode produced it. */
+      screeningMode: ScreeningMode;
+    }
+  | {
+      /**
+       * Builds the AccuRIP Emerald validation package: both screening modes,
+       * films, checklist and preflight, in one archive.
+       */
+      type: "emeraldPackage";
+      requestId: number;
+      plan: TransferPlan;
+      masks: ArrayBuffer[];
+      metadata: JobMetadata;
+      productionSize: ProductionSize;
+      exportSettings: ExportSettings;
+      width: number;
+      height: number;
+      /** Marks the built-in control target, which carries no customer artwork. */
+      isControlTarget: boolean;
     }
   | {
       /** Runs the pre-export checks without producing an archive. */
@@ -191,6 +211,22 @@ export type WorkerResponse =
       fileName: string;
       films: { name: string; pdfBytes: number; pngBytes: number; rasterWidth: number; rasterHeight: number }[];
       qaReport: FilmQAReport;
+    }
+  | {
+      type: "emeraldPackageBuilt";
+      requestId: number;
+      zip: ArrayBuffer;
+      fileName: string;
+      expectations: EmeraldExpectations;
+      preflightOk: boolean;
+      modes: {
+        mode: ScreeningMode;
+        fileName: string;
+        bytes: number;
+        plateNames: string[];
+        ok: boolean;
+        summary: string;
+      }[];
     }
   | { type: "filmQaReport"; requestId: number; report: FilmQAReport; filmSizeIn: { widthIn: number; heightIn: number }; rasterDpi: number }
   | { type: "progress"; requestId: number; stage: string; message: string; done?: number; total?: number }

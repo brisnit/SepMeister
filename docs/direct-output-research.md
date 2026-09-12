@@ -46,8 +46,11 @@ channels-to-RIP path it is doing document assembly:
 
 ## Assessment
 
-**For a raster separation job, Illustrator looks removable now**, provided the
-spot PDF is accepted by Emerald. Everything Illustrator contributes in this
+**For a raster separation job, Illustrator looks removable in principle**,
+provided the spot PDF is accepted by Emerald. That last clause is doing all the
+work and has not been tested, so the product says **"Direct Spot PDF — designed
+for RIP workflows"** and not "Replaces Illustrator". The wording changes only
+when a filled-in checklist says it can. Everything Illustrator contributes in this
 workflow — spot semantics, one plate per ink, exact scale, registration, plate
 names — is present in the spot PDF and verified in the test suite at the
 structural level.
@@ -71,3 +74,32 @@ Not a code change — a shop test:
 5. Compare the film to the one produced via the Illustrator path.
 
 Until that has happened, the claim is "should work", not "does".
+
+## How to run that test
+
+The app builds the package. **Test in AccuRIP Emerald** in the export column
+produces an archive containing both screening modes, the film positives, a
+composite proof, a production sheet, an expected-plates report, a machine
+preflight and a printable checklist. **Load EMERALD SPOT TEST** in the same
+panel swaps the job for a constructed six-plate control target that contains no
+customer artwork, so the answer is about the RIP rather than about a
+separation.
+
+Results go back into the same panel and export as JSON or CSV. Whatever comes
+back gets written into `rip-replacement-research.md` under *Nick's validated
+workflow* — which is currently, and correctly, empty.
+
+## The claim ladder
+
+Each rung needs the one below it. We are on the second.
+
+1. ~~The PDF contains real `/Separation` plates.~~ Verified structurally.
+2. ~~An independent renderer composites them correctly.~~ Verified through
+   CoreGraphics.
+3. **Emerald imports them as named plates at 100% with registration.** Not
+   tested.
+4. Film off the printer matches the Illustrator path. Not tested.
+5. *Then*: raster jobs can bypass Illustrator in validated Emerald workflows.
+
+Rungs 1 and 2 are properties of a file. Rungs 3 and 4 are properties of a shop,
+and no amount of further work on the file will establish them.

@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import type {
   ExportSettings, ImageAnalysis, InkSeparation, JobMetadata, PressPreset,
-  ProductionSettings, ProductionSize, QAResult, SeparationPlan, UnderbaseRelationship,
+  ProductionSettings, ProductionSize, QAResult, ScreeningMode, SeparationPlan,
+  UnderbaseRelationship,
 } from "@/lib/types";
 import type { InspectionResult } from "@/lib/spot/inspect";
 import type { OperationResult } from "@/lib/ai/operations";
@@ -79,6 +80,9 @@ export interface WorkspaceProps {
   onRemoveUnderbase: () => void;
   onRegenerateUnderbase: () => void;
   onSpotPdf: () => void;
+  onEmerald: () => void;
+  screeningMode: ScreeningMode;
+  onScreeningMode: (m: ScreeningMode) => void;
   onView: (v: ViewMode) => void;
   onUnderbaseView: (v: UnderbaseView) => void;
   onSelectInk: (id: string | null) => void;
@@ -434,16 +438,20 @@ export function Workspace(props: WorkspaceProps) {
               pixelHeight={height}
               onExportSettings={props.onExportSettings}
               onProductionSize={props.onProductionSize}
+              screeningMode={props.screeningMode}
+              onScreeningMode={props.onScreeningMode}
             />
           </div>
           {/* Pinned: the primary action stays visible however far the panel scrolls. */}
           <ExportAction
             onReview={props.onOpenOutputCheck}
             onSpotPdf={props.onSpotPdf}
+            onEmerald={props.onEmerald}
             busy={exportBusy}
             spotBusy={props.spotBusy}
             busyLabel={exportLabel}
             warningCount={productionWarnings.length}
+            screeningMode={props.screeningMode}
           />
         </aside>
       </div>

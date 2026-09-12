@@ -1,8 +1,9 @@
 "use client";
 
-import type { ExportSettings, ProductionSize } from "@/lib/types";
+import type { ExportSettings, ProductionSize, ScreeningMode } from "@/lib/types";
 import { Button, Field, SegmentedControl, Slider } from "./primitives";
 import { ProductionSizeControl } from "./ProductionSizeControl";
+import { ScreeningModeControl } from "./EmeraldPanel";
 
 const DPI_OPTIONS = [300, 600, 1200].map((v) => ({ value: v, label: String(v) }));
 
@@ -17,6 +18,7 @@ const DPI_OPTIONS = [300, 600, 1200].map((v) => ({ value: v, label: String(v) })
  */
 export function ExportPanel({
   exportSettings, productionSize, pixelWidth, pixelHeight, onExportSettings, onProductionSize,
+  screeningMode, onScreeningMode,
 }: {
   exportSettings: ExportSettings;
   productionSize: ProductionSize;
@@ -24,6 +26,8 @@ export function ExportPanel({
   pixelHeight: number;
   onExportSettings: (next: ExportSettings) => void;
   onProductionSize: (next: ProductionSize) => void;
+  screeningMode: ScreeningMode;
+  onScreeningMode: (m: ScreeningMode) => void;
 }) {
   return (
     <section className="border-t border-ink-100 px-3 py-3">
@@ -76,6 +80,10 @@ export function ExportPanel({
             </label>
           ))}
         </div>
+
+        <div className="border-t border-ink-50 pt-3.5">
+          <ScreeningModeControl value={screeningMode} onChange={onScreeningMode} />
+        </div>
       </div>
     </section>
   );
@@ -87,14 +95,16 @@ export function ExportPanel({
  * the main action must never be something you have to scroll to find.
  */
 export function ExportAction({
-  onReview, onSpotPdf, busy, spotBusy, busyLabel, warningCount,
+  onReview, onSpotPdf, onEmerald, busy, spotBusy, busyLabel, warningCount, screeningMode,
 }: {
   onReview: () => void;
   onSpotPdf: () => void;
+  onEmerald: () => void;
   busy: boolean;
   spotBusy: boolean;
   busyLabel: string;
   warningCount: number;
+  screeningMode: ScreeningMode;
 }) {
   return (
     <div className="border-t border-ink-100 bg-surface px-3 py-3">
@@ -111,6 +121,9 @@ export function ExportAction({
           <Button size="md" onClick={onSpotPdf} disabled={spotBusy} className="mt-1.5 w-full">
             {spotBusy ? "Building spot PDF…" : "DOWNLOAD SPOT PDF"}
           </Button>
+          <Button size="md" onClick={onEmerald} className="mt-1.5 w-full">
+            TEST IN ACCURIP EMERALD
+          </Button>
         </>
       )}
       <p className="mt-2 text-[10px] leading-snug text-ink-400">
@@ -119,8 +132,14 @@ export function ExportAction({
           : "Output check runs film QA before anything downloads. "}
         <span className="block pt-1">
           <strong className="text-ink-500">Films</strong> are black-on-white positives, one per screen, for
-          printing to transparency. <strong className="text-ink-500">Spot PDF</strong> is one page of named
-          separation plates, for a RIP.
+          printing to transparency. <strong className="text-ink-500">Direct Spot PDF</strong> is one page of
+          named separation plates — designed for RIP workflows, currently exported{" "}
+          {screeningMode === "sepwiz-screened" ? "with SepWiz screening" : "as continuous tone"}.
+        </span>
+        <span className="block pt-1">
+          Not yet validated through a RIP. Use{" "}
+          <strong className="text-ink-500">Test in AccuRIP Emerald</strong> to produce a package that
+          settles it.
         </span>
       </p>
     </div>

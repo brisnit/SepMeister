@@ -62,6 +62,7 @@ export const STORAGE_KEYS = {
   session: "session",
   feedback: "feedback",
   account: "account",
+  emerald: "emerald-validation",
 } as const;
 
 /** Deterministic-enough unique id. Not security-sensitive. */

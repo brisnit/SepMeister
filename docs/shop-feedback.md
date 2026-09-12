@@ -27,6 +27,7 @@ Photoshop channels → Illustrator → AccuRIP Emerald → film printer → burn
 | 11 | Explore eliminating Illustrator | **Researched** — see `direct-output-research.md` |
 | 12 | Explore eliminating AccuRIP Emerald | **Researched, not attempted** — see `rip-replacement-research.md` |
 | 13 | SepWiz as the whole separation-to-film prepress environment | Direction, not a milestone |
+| 14 | Prove or disprove SepWiz -> Spot PDF -> Emerald -> film | **Package built, awaiting the shop** — see below |
 
 ## What Nick's feedback changed about our assumptions
 
@@ -50,14 +51,33 @@ over. It does *not* report opacity. How opaque the printed result is depends on
 ink, mesh, deposit and garment, none of which SepWiz models. Labelling coverage
 as opacity would invite a separator to trust a number nobody computed.
 
+## The open question: who does the halftoning?
+
+Unanswered, and not answerable from a desk. There are three possibilities:
+
+- SepWiz screens and Emerald passes the dots through.
+- SepWiz sends continuous tone and Emerald screens it.
+- SepWiz screens and Emerald rescreens anyway.
+
+The third is the one worth watching for. It would not necessarily produce bad
+film, but it would mean every screening control in the app describes something
+the shop is not actually getting.
+
+Both modes are exported side by side in the validation package precisely so
+this is settled by comparison rather than by argument. Neither is treated as
+the preferred answer anywhere in the product.
+
 ## Still to capture from the shop
 
-Recorded through the Shop Test panel, not guessed at:
+Recorded through the Shop Test and Emerald panels, not guessed at:
 
 - film printer manufacturer and model
-- AccuRIP Emerald configuration
+- AccuRIP version and Emerald configuration
 - output resolution
 - media
-- ink/density settings
+- ink channel configuration, density settings, black ink strategy
+- page size, halftone settings, any custom presets
 
-Nothing about direct printer output should be built before those are known.
+Nothing about direct printer output should be built before those are known, and
+nothing in the app should imply a printer is supported until a film from that
+device has physically been produced.

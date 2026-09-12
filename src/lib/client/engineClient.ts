@@ -126,6 +126,15 @@ export class EngineClient {
     return this.send<Extract<WorkerResponse, { type: "spotPdfBuilt" }>>({ type: "spotPdf", ...req }, []);
   }
 
+  emeraldPackage(
+    req: Omit<Extract<WorkerRequest, { type: "emeraldPackage" }>, "type" | "requestId">,
+    onProgress?: (message: string, done?: number, total?: number) => void,
+  ) {
+    return this.send<Extract<WorkerResponse, { type: "emeraldPackageBuilt" }>>(
+      { type: "emeraldPackage", ...req }, [], onProgress,
+    );
+  }
+
   filmQa(req: Omit<Extract<WorkerRequest, { type: "filmQa" }>, "type" | "requestId">) {
     return this.send<Extract<WorkerResponse, { type: "filmQaReport" }>>({ type: "filmQa", ...req }, []);
   }

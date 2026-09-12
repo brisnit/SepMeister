@@ -9,6 +9,9 @@
 
 import { runSeparation, applyInkSettings, rebuildUnderbase } from "@/lib/engine/pipeline";
 import { buildSpotPdf } from "@/lib/spot/spotPdf";
+import { buildEmeraldPackage } from "@/lib/emerald/package";
+import { summarizeInspection } from "@/lib/emerald/inspector";
+import { screeningModeSlug } from "@/lib/emerald/expectations";
 import { toSpotColors } from "@/lib/spot/spotColor";
 import { slugify } from "@/lib/engine/naming";
 import { planUpscale, applyUpscale } from "@/lib/engine/upscale";
@@ -253,10 +256,48 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
         post(
           {
             type: "spotPdfBuilt", requestId: req.requestId, bytes: buf(built.bytes),
-            fileName: `${slugify(req.metadata.jobName || "untitled-job")}-spot.pdf`,
+            // The mode is in the file name because the two exports are
+            // indistinguishable once they are sitting in a downloads folder.
+            fileName: `${slugify(req.metadata.jobName || "untitled-job")}-spot-${screeningModeSlug(req.screeningMode)}.pdf`,
             plateNames: built.plateNames,
           },
           [buf(built.bytes)],
+        );
+        break;
+      }
+
+      case "emeraldPackage": {
+        const inks = req.plan.inks.map((ink, i) => ({ ...ink, mask: new Uint8ClampedArray(req.masks[i]) }));
+        const built = await buildEmeraldPackage({
+          jobName: req.metadata.jobName || "untitled-job",
+          customer: req.metadata.customer,
+          plan: { ...req.plan, inks },
+          width: req.width,
+          height: req.height,
+          productionSize: req.productionSize,
+          exportSettings: req.exportSettings,
+          isControlTarget: req.isControlTarget,
+          onProgress: (done, total, label) =>
+            post({ type: "progress", requestId: req.requestId, stage: "emerald", message: label, done, total }),
+        });
+        post(
+          {
+            type: "emeraldPackageBuilt",
+            requestId: req.requestId,
+            zip: buf(built.zip),
+            fileName: built.fileName,
+            expectations: built.expectations,
+            preflightOk: built.preflightOk,
+            modes: built.modes.map((m) => ({
+              mode: m.mode,
+              fileName: m.fileName,
+              bytes: m.bytes,
+              plateNames: m.plateNames,
+              ok: m.inspection.ok,
+              summary: summarizeInspection(m.inspection),
+            })),
+          },
+          [buf(built.zip)],
         );
         break;
       }

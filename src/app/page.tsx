@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
-  ExportSettings, FeedbackRecord, FilmQAReport, HalftoneSettings, UnderbaseRelationship,
-  ImageAnalysis, InkSeparation, JobMetadata, PressPreset, ProductionSettings,
-  ProductionSize, QAResult, SeparationPlan,
+  EmeraldValidationResult, ExportSettings, FeedbackRecord, FilmQAReport, HalftoneSettings,
+  UnderbaseRelationship, ImageAnalysis, InkSeparation, JobMetadata, PressPreset,
+  ProductionSettings, ProductionSize, QAResult, ScreeningMode, SeparationPlan,
 } from "@/lib/types";
 import { EngineClient, EngineError } from "@/lib/client/engineClient";
 import { deterministicProvider, type OperationResult, type SeparationOperation } from "@/lib/ai/operations";
@@ -13,6 +13,10 @@ import { encodePng } from "@/lib/film/png";
 import { collectProductionWarnings } from "@/lib/film/bundle";
 import { applyPrintOrder } from "@/lib/engine/printOrder";
 import { contributionFor } from "@/lib/engine/pipeline";
+import { compositeLayers } from "@/lib/engine/composite";
+import { analyzeArtwork } from "@/lib/engine/analyze";
+import { unionCoverage } from "@/lib/engine/masks";
+import { scoreSeparation } from "@/lib/engine/qa";
 import { inspectPoint, type InspectionResult } from "@/lib/spot/inspect";
 import type { LoupePower } from "@/components/InspectionCanvas";
 import type { ChannelRender } from "@/components/SpotChannels";
@@ -32,6 +36,12 @@ import { Workspace, type ViewMode } from "@/components/Workspace";
 import { OutputCheck } from "@/components/OutputCheck";
 import { ReviewMode } from "@/components/ReviewMode";
 import { ShopTestPanel, answersFromRecord, emptyAnswers, hasAnswers, type ShopTestAnswers } from "@/components/ShopTestPanel";
+import { EmeraldPanel } from "@/components/EmeraldPanel";
+import { buildEmeraldTestJob, EMERALD_TEST_GARMENT } from "@/lib/emerald/testJob";
+import {
+  addEmeraldResult, emeraldExportCsv, emeraldExportJson, emptyEmeraldResult,
+  hasEmeraldAnswers, loadEmeraldResults, saveEmeraldResults,
+} from "@/lib/store/emerald";
 import type { UnderbaseView } from "@/components/UnderbasePanel";
 import type { DemoStep } from "@/components/DemoRail";
 
@@ -126,6 +136,14 @@ export default function Page() {
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [qaReport, setQaReport] = useState<FilmQAReport | null>(null);
   const [rasterDpi, setRasterDpi] = useState<number | null>(null);
+  const [screeningMode, setScreeningMode] = useState<ScreeningMode>("sepwiz-screened");
+  const [showEmerald, setShowEmerald] = useState(false);
+  const [emeraldResults, setEmeraldResults] = useState<EmeraldValidationResult[]>([]);
+  const [emeraldDraft, setEmeraldDraft] = useState<EmeraldValidationResult | null>(null);
+  const [emeraldSaved, setEmeraldSaved] = useState(false);
+  const [emeraldBusy, setEmeraldBusy] = useState(false);
+  const [emeraldLabel, setEmeraldLabel] = useState("");
+  const [lastEmeraldPackage, setLastEmeraldPackage] = useState<string | null>(null);
 
   const clientRef = useRef<EngineClient | null>(null);
   const sourceRef = useRef<Source | null>(null);
@@ -152,6 +170,7 @@ export default function Page() {
     setPresets(loadPresets());
     setAccount(loadAccount());
     setFeedback(loadFeedback());
+    setEmeraldResults(loadEmeraldResults());
 
     const saved = loadSession();
     if (!saved) return;
@@ -1179,7 +1198,10 @@ export default function Page() {
         exportSettings,
         width: source.width,
         height: source.height,
-        applyHalftones: plan.inks.some((i) => i.halftone.enabled),
+        // Continuous tone means the RIP screens, so SepWiz must not.
+        applyHalftones:
+          screeningMode === "sepwiz-screened" && plan.inks.some((i) => i.halftone.enabled),
+        screeningMode,
       });
       const blob = new Blob([res.bytes], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
@@ -1196,7 +1218,195 @@ export default function Page() {
     } finally {
       setSpotBusy(false);
     }
-  }, [plan, metadata, productionSize, exportSettings, fail]);
+  }, [plan, metadata, productionSize, exportSettings, screeningMode, fail]);
+
+  // ---- AccuRIP Emerald validation --------------------------------------
+
+  /**
+   * Loads the built-in control target as the current job.
+   *
+   * The plates are set directly rather than separated. Running the target
+   * through the engine would reintroduce exactly the variable it exists to
+   * remove: if Emerald images something unexpected we need to know it is
+   * Emerald, not our clustering.
+   */
+  const loadControlTarget = useCallback(async () => {
+    setError(null);
+    setBusy(true);
+    setBusyLabel("Building EMERALD SPOT TEST");
+    await new Promise((r) => setTimeout(r, 0));
+    try {
+      const job = buildEmeraldTestJob();
+
+      // The target's artwork is its own composite: there was no upstream image,
+      // so the plates flattened onto the garment are the only truthful thing to
+      // show as "original". Building it here also gives the workspace real
+      // analysis and QA rather than placeholders, which is what keeps the
+      // inspector, the loupe and the export path working unchanged.
+      const composite = compositeLayers(
+        job.plan.inks.map((ink) => ({
+          mask: { data: ink.mask, width: job.width, height: job.height },
+          color: ink.displayColor,
+          visible: true,
+          role: ink.type === "underbase" ? ("substrate" as const) : ("ink" as const),
+        })),
+        job.width, job.height, job.plan.garmentColor,
+      );
+      sourceRef.current = { pixels: composite, width: job.width, height: job.height };
+      originalSourceRef.current = null;
+      baseMasksRef.current = new Map(job.plan.inks.map((i) => [i.id, new Uint8ClampedArray(i.mask)]));
+      pendingInkStateRef.current = null;
+
+      setProductionSize(job.productionSize);
+      setSettings((prev) => ({
+        ...prev,
+        jobName: "EMERALD SPOT TEST",
+        garmentColor: EMERALD_TEST_GARMENT,
+        maxScreens: job.plan.inks.length,
+      }));
+      setMetadata((m) => ({ ...m, jobName: "EMERALD SPOT TEST", customer: "", notes: "" }));
+      const targetDpi = effectiveDpi(job.width, job.productionSize);
+      const analysisResult = analyzeArtwork(composite, job.width, job.height);
+      const topUnion = unionCoverage(
+        job.plan.inks
+          .filter((i) => i.type !== "underbase")
+          .map((i) => ({ width: job.width, height: job.height, data: i.mask })),
+      );
+
+      setPlan(job.plan);
+      setOriginalRgba(composite);
+      setCompositeRgba(composite);
+      setAnalysis(analysisResult);
+      setQa(scoreSeparation({
+        plan: job.plan,
+        analysis: analysisResult,
+        width: job.width,
+        height: job.height,
+        dpi: targetDpi,
+        // The plates are the artwork, so the separation reproduces it exactly.
+        similarity: 100,
+        topInkUnion: topUnion,
+      }));
+      setSimilarity(100);
+      setInfo({
+        fileName: "EMERALD SPOT TEST (built in)",
+        fileType: "Constructed control target",
+        originalWidth: job.width,
+        originalHeight: job.height,
+        width: job.width,
+        height: job.height,
+        dpi: targetDpi,
+        dpiAssumed: false,
+        downscaled: false,
+        hasAlpha: false,
+        detectedBackground: null,
+        uniqueColors: analysisResult.uniqueColors,
+        uniqueColorsExact: analysisResult.uniqueColorsExact,
+        // A real thumbnail: the setup screen and upload screen both render it,
+        // and an empty src shows as a broken image.
+        thumbnailUrl: makeThumbnail(composite, job.width, job.height).url,
+      });
+      setQaReport(null);
+      setSelectedInk(null);
+      setSoloInk(null);
+      setUnderbaseView("off");
+      setView("composite");
+      setStage("workspace");
+      setUpscaleApplied(false);
+      setUpscaledFrom(null);
+      setNotice(
+        `EMERALD SPOT TEST loaded — ${job.plan.inks.length} constructed plates, ` +
+        "no customer artwork. Build the validation package to export it.",
+      );
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy(false);
+    }
+  }, [fail, makeThumbnail]);
+
+  const onBuildEmeraldPackage = useCallback(async () => {
+    const source = sourceRef.current;
+    if (!plan || !source) return;
+    setEmeraldBusy(true);
+    setEmeraldLabel("Building…");
+    try {
+      const res = await client().emeraldPackage(
+        {
+          plan: { ...plan, inks: plan.inks.map(({ mask: _m, ...rest }) => rest) },
+          masks: plan.inks.map((i) => i.mask.slice().buffer as ArrayBuffer),
+          metadata,
+          productionSize,
+          exportSettings,
+          width: source.width,
+          height: source.height,
+          isControlTarget: metadata.jobName.trim().toUpperCase() === "EMERALD SPOT TEST",
+        },
+        (message) => setEmeraldLabel(message),
+      );
+
+      const blob = new Blob([res.zip], { type: "application/zip" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = res.fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+
+      // The draft is seeded with the plate count we actually wrote, so the
+      // operator compares Emerald against a verified number rather than an
+      // intention.
+      setEmeraldDraft((d) => ({
+        ...(d ?? emptyEmeraldResult(metadata.jobName || "untitled-job", screeningMode, res.expectations.plateCount)),
+        expectedSpotPlates: res.expectations.plateCount,
+      }));
+      setLastEmeraldPackage(
+        `${res.fileName} — ${res.modes.map((m) => `${m.fileName} ${m.ok ? "preflight PASS" : "PREFLIGHT FAILED"}`).join(", ")}`,
+      );
+      setNotice(
+        res.preflightOk
+          ? `Emerald package written: both spot PDFs passed preflight with ${res.expectations.plateCount} named plates.`
+          : "Emerald package written, but at least one spot PDF FAILED preflight. Check the README before testing.",
+      );
+    } catch (err) {
+      fail(err);
+    } finally {
+      setEmeraldBusy(false);
+      setEmeraldLabel("");
+    }
+  }, [plan, metadata, productionSize, exportSettings, screeningMode, fail]);
+
+  const openEmerald = useCallback(() => {
+    setEmeraldDraft((d) =>
+      d ?? emptyEmeraldResult(metadata.jobName || "untitled-job", screeningMode, plan?.inks.length ?? 0),
+    );
+    setEmeraldSaved(false);
+    setShowEmerald(true);
+  }, [metadata.jobName, screeningMode, plan]);
+
+  const onSaveEmerald = useCallback(() => {
+    if (!emeraldDraft || !hasEmeraldAnswers(emeraldDraft)) return;
+    const record = { ...emeraldDraft, recordedAt: new Date().toISOString() };
+    const next = addEmeraldResult(emeraldResults, record);
+    setEmeraldResults(next);
+    saveEmeraldResults(next);
+    setEmeraldSaved(true);
+  }, [emeraldDraft, emeraldResults]);
+
+  const onExportEmerald = useCallback((format: "json" | "csv") => {
+    const body = format === "csv" ? emeraldExportCsv(emeraldResults) : emeraldExportJson(emeraldResults);
+    const blob = new Blob([body], { type: format === "csv" ? "text/csv" : "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sepwiz-emerald-validation-${new Date().toISOString().slice(0, 10)}.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }, [emeraldResults]);
 
   const reset = useCallback(() => {
     // Several jobs get tested back to back, so this runs often. Losing an
@@ -1391,6 +1601,9 @@ export default function Page() {
         onRemoveUnderbase={onRemoveUnderbase}
         onRegenerateUnderbase={onRegenerateUnderbase}
         onSpotPdf={onSpotPdf}
+        onEmerald={openEmerald}
+        screeningMode={screeningMode}
+        onScreeningMode={setScreeningMode}
         onView={setView}
         onUnderbaseView={setUnderbaseView}
         onSelectInk={setSelectedInk}
@@ -1471,6 +1684,25 @@ export default function Page() {
           onSave={onSaveFeedback}
           onExport={onExportFeedback}
           onClose={() => setShowFeedback(false)}
+        />
+      ) : null}
+
+      {showEmerald && emeraldDraft ? (
+        <EmeraldPanel
+          jobName={metadata.jobName}
+          expectedPlates={plan?.inks.length ?? 0}
+          result={emeraldDraft}
+          onChange={(r) => { setEmeraldDraft(r); setEmeraldSaved(false); }}
+          onSave={onSaveEmerald}
+          onExport={onExportEmerald}
+          onBuildPackage={onBuildEmeraldPackage}
+          onLoadControlTarget={() => { setShowEmerald(false); void loadControlTarget(); }}
+          onClose={() => setShowEmerald(false)}
+          saved={emeraldSaved}
+          recordCount={emeraldResults.length}
+          building={emeraldBusy}
+          buildLabel={emeraldLabel}
+          lastPackage={lastEmeraldPackage}
         />
       ) : null}
     </>

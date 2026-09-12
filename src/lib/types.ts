@@ -412,3 +412,98 @@ export interface ProgressEvent {
   /** Only set when the stage can genuinely report a fraction. */
   fraction?: number;
 }
+
+/**
+ * Who applies the halftone screen.
+ *
+ * The single most important unknown in the SepWiz -> RIP handoff, and the
+ * reason both modes exist rather than one. Neither is better in the abstract:
+ * screening here gives us exact control over dot shape and angle, screening in
+ * the RIP lets the RIP match the dot it was calibrated for on that printer and
+ * that film. Which one a shop wants is a question about their RIP, and it can
+ * only be answered by sending both through it.
+ */
+export type ScreeningMode = "sepwiz-screened" | "continuous-tone";
+
+/** What a RIP is expected to find in an exported spot PDF. */
+export interface PlateExpectation {
+  index: number;
+  name: string;
+  role: InkType;
+  mesh: number;
+  /** "45 LPI / 15 deg / round", or "Continuous tone" / "Solid". */
+  screening: string;
+  coveragePercent: number;
+}
+
+export interface EmeraldExpectations {
+  jobName: string;
+  screeningMode: ScreeningMode;
+  plates: PlateExpectation[];
+  plateCount: number;
+  /** Always 100. Any other value means something rescaled the job. */
+  scalePercent: number;
+  artworkWidthIn: number;
+  artworkHeightIn: number;
+  boardWidthIn: number;
+  boardHeightIn: number;
+  registrationLayout: string;
+  registrationCount: number;
+  polarity: "positive" | "negative";
+  screeningSummary: string;
+  filmDpi: number;
+}
+
+export type EmeraldTriState = "yes" | "no" | "partial";
+export type EmeraldScreeningObserved = "sepwiz-preserved" | "rip-rescreened" | "unknown";
+export type EmeraldFilmOutcome = "correct" | "usable-with-changes" | "failed";
+
+/**
+ * The shop's AccuRIP configuration, recorded rather than assumed.
+ *
+ * Every field is optional free text and nothing is prefilled. A guessed
+ * printer model in this record would later be read as a validated one, and the
+ * whole point of the document is to separate what we know from what we hope.
+ */
+export interface AccuRipSetup {
+  accuRipVersion: string;
+  printerManufacturer: string;
+  printerModel: string;
+  outputResolution: string;
+  mediaType: string;
+  inkChannelConfiguration: string;
+  densitySettings: string;
+  blackInkStrategy: string;
+  pageSize: string;
+  halftoneSettings: string;
+  customPresets: string;
+}
+
+export function emptyAccuRipSetup(): AccuRipSetup {
+  return {
+    accuRipVersion: "", printerManufacturer: "", printerModel: "",
+    outputResolution: "", mediaType: "", inkChannelConfiguration: "",
+    densitySettings: "", blackInkStrategy: "", pageSize: "",
+    halftoneSettings: "", customPresets: "",
+  };
+}
+
+/** What actually happened when the spot PDF was opened in Emerald. */
+export interface EmeraldValidationResult {
+  id: string;
+  recordedAt: string;
+  jobName: string;
+  /** Which of the two exports this result describes. */
+  screeningMode: ScreeningMode;
+  fileOpened: boolean | null;
+  spotPlatesDetected: number | null;
+  expectedSpotPlates: number;
+  plateNamesPreserved: EmeraldTriState | null;
+  unexpectedPlates: string;
+  scalePreserved: boolean | null;
+  registrationPreserved: boolean | null;
+  screeningBehavior: EmeraldScreeningObserved | null;
+  filmOutput: EmeraldFilmOutcome | null;
+  notes: string;
+  setup: AccuRipSetup;
+}

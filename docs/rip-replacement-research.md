@@ -59,3 +59,55 @@ guessed — it depends on the printer, the ink and the media.
 The intermediate milestone — SepWiz → spot PDF → AccuRIP — removes Photoshop
 channels and Illustrator from the workflow without touching the part that is
 genuinely hard. That is where the value is right now.
+
+---
+
+## Nick's validated workflow
+
+**Nothing has been validated yet.** This section exists so that the moment a
+result arrives it has somewhere to go that is not a Slack message, and so that
+the shape of the answer is agreed before anyone is tempted to round it up.
+
+Fill this in from a completed `EMERALD-VALIDATION-CHECKLIST`, not from
+recollection. The Emerald panel exports the same fields as JSON and CSV, and
+`validatedWorkflowMarkdown()` in `src/lib/store/emerald.ts` renders the table
+below directly from saved results.
+
+| Question | Observed | Recorded by | Date |
+|---|---|---|---|
+| SepWiz file type accepted | — | — | — |
+| Emerald import behaviour | — | — | — |
+| Spot handling (plates, names) | — | — | — |
+| Screening responsibility | — | — | — |
+| Density behaviour | — | — | — |
+| Printer path | — | — | — |
+| Film result | — | — | — |
+
+### The question this settles
+
+Who applies the halftone screen. There are three possible answers and we do
+not know which one is true:
+
+- **A.** SepWiz outputs final screened film data and Emerald passes it through.
+- **B.** SepWiz outputs continuous-tone spot plates and Emerald screens them.
+- **C.** Emerald rescreens data SepWiz already screened.
+
+C is the one to watch for. It is not a failure — the film may be perfectly
+good — but it means our angles and dot shape are decorative, and every
+screening control in the app is describing something the shop is not actually
+getting. The validation package exports both modes side by side specifically
+so this can be answered by comparison rather than by argument.
+
+### What a passing result would and would not license
+
+A completed checklist with no failures would let us say: *raster jobs can
+bypass Illustrator in validated Emerald workflows.* It would say nothing about
+replacing Emerald. The table at the top of this document is unchanged by any
+Emerald result, because the responsibilities it lists — ink density, device
+rasterization, printer communication — sit downstream of the file we hand over.
+
+### Which Emerald responsibilities would remain
+
+Every row in the table above marked **Not modelled** or **None** stays exactly
+where it is. Validating the spot PDF removes Illustrator from the workflow. It
+moves nothing out of the RIP.
